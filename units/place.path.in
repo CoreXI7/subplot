@@ -1,0 +1,9 @@
+[Unit]
+Description=Subplot: run @UNIT_PREFIX@-place right after a decision on the page (the board touches decisions/.kick)
+
+[Path]
+PathChanged=@STATE_DIR@/decisions/.kick
+Unit=@UNIT_PREFIX@-place.service
+
+[Install]
+WantedBy=paths.target

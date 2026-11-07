@@ -1,0 +1,63 @@
+[Unit]
+Description=Subplot: validate and speech-check incoming subtitles (no network, no secrets; media read-only)
+OnSuccess=@UNIT_PREFIX@-place.service
+
+[Service]
+Type=oneshot
+User=@RUN_USER@
+Group=@RUN_GROUP@
+ExecStart=@VENV@/bin/python -I @CODE_DIR@/subplot/sync.py
+Environment=SUBS_STATE=@STATE_DIR@
+Environment=SUBS_RULES=@CONFIG_DIR@/rules.json
+Environment=SUBS_ENV=@CONFIG_DIR@/.env
+Environment="SUBS_PLEX_DB=@PLEX_DB@"
+Environment=SUBS_PC=@PC_HOST@
+Environment=SUBS_PC_ROOT=@PC_ROOT@
+Environment=SUBS_HOST=@PUBLIC_HOST@
+Environment=SUBS_SOCK=@SOCKET@
+Environment=SUBS_SOCK_GROUP=@PROXY_GROUP@
+Environment=SUBS_MARKER_TAG=@MARKER_TAG@
+Environment="SUBS_USER_AGENT=@USER_AGENT@"
+Environment=SUBS_NAV_FILE=@CONFIG_DIR@/nav.json
+Environment=SUBS_OVERLAY=@OVERLAY_DIR@
+TimeoutStartSec=2h
+BindPaths=@STATE_DIR@
+BindReadOnlyPaths=@MEDIA_ROOT@
+InaccessiblePaths=-@CONFIG_DIR@/.env
+InaccessiblePaths=-@STATE_DIR@/tokens
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+MemoryMax=1G
+TasksMax=64
+CPUQuota=200%
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths=@CODE_DIR@
+BindReadOnlyPaths=@CONFIG_DIR@
+BindReadOnlyPaths=@VENV@
+InaccessiblePaths=-/run/docker.sock
+InaccessiblePaths=-/var/run/docker.sock
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @debug
+# onnxruntime binds its arena with mbind and numpy reads its limits with prlimit64 (both in @resources); without them the
+# process dies with SIGSYS before the detector loads. Both act only on the process's own memory and limits.
+SystemCallFilter=mbind prlimit64
+
+[Install]
+WantedBy=multi-user.target

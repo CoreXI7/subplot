@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""Privacy guard for pushes: scans paths, bytes and commit metadata.
+
+tools/pre-push [--scan] [--history]; no flags = git pre-push hook (stdin refs).
+--scan = tracked working tree, --history = all commits. Exit 0 clean, 1 findings,
+2 usage/git error. The matched text is never printed. A line containing the word privacy-ok
+(a deliberate test fixture) is skipped; private patterns live in .git/info/private-patterns.
+"""
+import os, re, subprocess, sys
+
+# Generic patterns as (name, compiled regex); names are what the hook prints.
+PATTERNS = [
+    # RFC 1918 addresses, except the documentation range 10.0.0.x and the bare network ranges (firewall deny lists).
+    ("lan-ip", re.compile(r"\b(?!(?:192\.168\.0\.0/16|172\.16\.0\.0/12)\b)(?:10\.(?!0\.0\.)\d{1,3}|172\.(?:1[6-9]|2\d|3[01])"
+                          r"|192\.168)\.\d{1,3}\.\d{1,3}\b")),
+    ("personal-mail", re.compile(r"[A-Za-z0-9._%+-]+@(?:gmail|googlemail|yahoo"
+                                 r"|hotmail|outlook|icloud|proton|protonmail)\.(?:com|me)\b")),
+    ("private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}|\bgithub_pat_[A-Za-z0-9_]{40,}")),
+    ("api-key", re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}")),
+    ("aws-key", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("slack-token", re.compile(r"\bxox[abprs]-[A-Za-z0-9-]{10,}")),
+    ("google-key", re.compile(r"\bAIza[0-9A-Za-z_-]{35}\b")),
+    ("hard-coded-secret", re.compile(r"\b(?:password|passwd|secret|api_?key|token)"
+                                     r"\s*[:=]\s*['\"][^'\"\s]{8,}['\"]", re.IGNORECASE)),
+    ("forbidden-file", re.compile(r"(?:^|/)\.env$|(?:^|/)rules\.json$|(?:^|/)subplot\.conf$"
+                                  r"|(?:^|/)nav\.json$|(?:^|/)state/|\.bak|\.pem$")),
+]
+PATH_ONLY = {"forbidden-file"}  # path rules, never applied to file contents
+FINDINGS = 0
+PRIVATE = []  # [(name, regex)], filled by load_private()
+
+
+class HookError(Exception): pass  # usage or git failure -> exit code 2
+
+
+def report(where, name):
+    """One line per finding; the matched text is never printed."""
+    global FINDINGS
+    FINDINGS += 1
+    print("%s: %s" % (where, name))
+
+
+def scan_paths(paths, prefix=""):
+    for path in paths:
+        for name, rx in PATTERNS:
+            if name in PATH_ONLY and rx.search(path):
+                report(prefix + path, name)
+        for name, rx in PRIVATE:
+            if rx.search(path):
+                report(prefix + path, name)
+
+
+def scan_text(where, text):
+    if "privacy-ok" in text:  # a test fixture line marked on purpose: that one line is skipped, never the file
+        text = "\n".join(l for l in text.split("\n") if "privacy-ok" not in l)
+    for name, rx in PATTERNS:
+        if name not in PATH_ONLY and rx.search(text):
+            report(where, name)
+    for name, rx in PRIVATE:
+        if rx.search(text):
+            report(where, name)
+
+
+def scan_blob(where, data):
+    # latin-1 maps every byte, so binary payloads are searched too.
+    scan_text(where, data.decode("latin-1"))
+
+
+def git(*args, binary=False):
+    proc = subprocess.run(["git"] + list(args), stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE)
+    if proc.returncode != 0:
+        msg = proc.stderr.decode("utf-8", "replace").strip()
+        raise HookError("git %s failed: %s" % (args[0], msg))
+    return proc.stdout if binary else proc.stdout.decode("utf-8", "replace")
+
+
+def load_private(git_dir):
+    """Private regexes from .git/info/private-patterns, one per line."""
+    path = os.path.join(git_dir, "info", "private-patterns")
+    if not os.path.isfile(path):
+        return []
+    patterns = []
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for number, line in enumerate(fh, 1):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                rx = re.compile(line, re.IGNORECASE)
+            except re.error as exc:
+                raise HookError("%s line %d: invalid regex: %s" % (path, number, exc))
+            patterns.append(("private-%d" % number, rx))
+    return patterns
+
+
+def outgoing_commits(stdin_lines):
+    """Commit shas a push would send, from pre-push stdin lines."""
+    commits, seen = [], set()
+    for line in stdin_lines:
+        parts = line.split()
+        if len(parts) != 4:
+            continue
+        local_sha, remote_sha = parts[1], parts[3]
+        if not local_sha.strip("0"):
+            continue  # ref deletion
+        if not remote_sha.strip("0"):
+            args = ["rev-list", local_sha, "--not", "--remotes"]
+        else:
+            args = ["rev-list", "%s..%s" % (remote_sha, local_sha)]
+        for sha in git(*args).split():
+            if sha not in seen:
+                seen.add(sha)
+                commits.append(sha)
+    return commits
+
+
+def commit_fields(sha):
+    """Message, author/committer identity, changed paths and new blob shas."""
+    meta = git("log", "-1", "--format=%an%x00%ae%x00%cn%x00%ce", sha)
+    parts = meta.rstrip("\n").split("\0")
+    fields = {"message": git("log", "-1", "--format=%B", sha),
+              "name": parts[0], "email": parts[1],
+              "committer_name": parts[2], "committer_email": parts[3],
+              "paths": [], "blobs": []}
+    # --raw -z entry: :oldmode newmode oldsha newsha STATUS\0path\0[newpath\0]
+    raw = git("diff-tree", "-r", "-M", "-m", "--root", "--no-commit-id",
+              "--raw", "-z", sha, binary=True)
+    items = [item for item in raw.split(b"\0") if item]
+    index = 0
+    while index < len(items):
+        info = items[index][1:].split()
+        index += 1
+        if len(info) < 5:
+            continue
+        new_mode, new_sha, status = info[1], info[3], info[4]
+        if status[:1] in (b"R", b"C"):
+            # Both sides of a rename/copy matter to the path rules.
+            fields["paths"].append(os.fsdecode(items[index]))
+            index += 1
+        new_path = os.fsdecode(items[index])
+        index += 1
+        fields["paths"].append(new_path)
+        if new_mode != b"160000" and new_sha.strip(b"0"):
+            fields["blobs"].append((new_path, new_sha.decode("ascii")))
+    fields["paths"] = list(dict.fromkeys(fields["paths"]))
+    return fields
+
+
+class BlobReader:
+    """git cat-file --batch wrapper: raw blob bytes, None when absent."""
+
+    def __init__(self):
+        self.proc = subprocess.Popen(["git", "cat-file", "--batch"],
+                                     stdin=subprocess.PIPE,
+                                     stdout=subprocess.PIPE)
+
+    def read(self, sha):
+        self.proc.stdin.write(sha.encode("ascii") + b"\n")
+        self.proc.stdin.flush()
+        header = self.proc.stdout.readline().split()
+        if len(header) != 3 or header[1] != b"blob":
+            return None
+        size = int(header[2])
+        data = b""
+        while len(data) < size:
+            chunk = self.proc.stdout.read(size - len(data))
+            if not chunk:
+                raise HookError("git cat-file stream ended early")
+            data += chunk
+        self.proc.stdout.read(1)  # trailing newline
+        return data
+
+    def close(self):
+        self.proc.stdin.close()
+        self.proc.stdout.close()
+        self.proc.wait()
+
+
+def scan_commit(sha, reader, done_blobs):
+    fields = commit_fields(sha)
+    short = sha[:12]
+    for key, label in (("message", "message"), ("name", "author name"),
+                       ("email", "author email"), ("committer_name", "committer name"),
+                       ("committer_email", "committer email")):
+        scan_text("commit %s %s" % (short, label), fields[key])
+    scan_paths(fields["paths"], "commit %s " % short)
+    for path, blob_sha in fields["blobs"]:
+        if blob_sha not in done_blobs:
+            done_blobs.add(blob_sha)
+            data = reader.read(blob_sha)
+            if data is not None:
+                scan_blob("commit %s %s" % (short, path), data)
+
+
+def scan_worktree():
+    raw = git("ls-files", "-z", binary=True)
+    paths = [os.fsdecode(p) for p in raw.split(b"\0") if p]
+    scan_paths(paths)
+    for path in paths:
+        try:
+            if os.path.islink(path):
+                scan_text(path, os.readlink(path))  # the link itself, never what it points at
+                continue
+            with open(path, "rb") as fh:
+                scan_blob(path, fh.read())
+        except OSError:
+            pass  # deleted in the worktree
+
+
+def scan_history():
+    reader = BlobReader()
+    done_blobs = set()
+    try:
+        for sha in git("rev-list", "--all").split():
+            scan_commit(sha, reader, done_blobs)
+    finally:
+        reader.close()
+
+
+def main(argv):
+    global PRIVATE
+    args = argv[1:]
+    scan_tree = "--scan" in args
+    scan_hist = "--history" in args
+    try:
+        if not scan_tree and not scan_hist and sys.stdin.isatty():
+            raise HookError("nothing to check: use --scan/--history or pipe refs")
+        PRIVATE = load_private(os.path.abspath(git("rev-parse", "--git-dir").strip()))
+        if scan_tree or scan_hist:
+            if scan_tree:
+                top = git("rev-parse", "--show-toplevel").strip()
+                if top:
+                    os.chdir(top)
+                scan_worktree()
+            if scan_hist:
+                scan_history()
+        else:
+            reader = BlobReader()
+            done_blobs = set()
+            try:
+                for sha in outgoing_commits(sys.stdin):
+                    scan_commit(sha, reader, done_blobs)
+            finally:
+                reader.close()
+    except (HookError, OSError) as exc:
+        sys.stderr.write("pre-push: %s\n" % exc)
+        return 2
+    return 1 if FINDINGS else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

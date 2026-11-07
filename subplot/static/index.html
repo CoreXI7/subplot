@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Subplot</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="base.css">
+<link rel="stylesheet" href="subs.css">
+<script src="subs.js" defer></script>
+<script src="subs-views.js" defer></script>
+</head>
+<body class="subs-page">
+<header class="top">
+  <div>
+    <h1 class="logo"><a class="logo-link" href="./">subplot</a></h1>
+    <p id="summary" class="summary" role="status" aria-live="polite">Loading…</p>
+  </div>
+  <p id="fresh" class="fresh"></p>
+</header>
+<nav class="tabs" id="tabs" aria-label="Sections" hidden></nav>
+<main class="subs">
+  <p id="unavailable" class="subs-quiet" hidden>Subs service unavailable. Showing the last data.</p>
+  <p id="stale" class="subs-warn" hidden></p>
+
+  <section class="block progress" aria-labelledby="h-progress">
+    <h2 id="h-progress">Progress</h2>
+    <div class="prog-head"><span class="prog-label">English subtitles</span><span id="prog-pct" class="prog-pct">–</span></div>
+    <div id="prog-bar" class="prog-bar" role="progressbar" aria-label="English subtitles across Plex" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="prog-fill" class="prog-fill"></div></div>
+    <p id="prog-nums" class="prog-nums"></p>
+    <div id="now" class="now" aria-live="polite">
+      <div class="now-head"><span id="now-dot" class="now-dot" aria-hidden="true"></span><span id="now-title" class="now-title">Idle</span><span id="now-pct" class="now-pct"></span></div>
+      <div id="now-bar" class="now-bar" role="progressbar" aria-label="Current item" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div id="now-fill" class="now-fill"></div></div>
+      <p id="now-meta" class="now-meta"></p>
+      <label class="switch" for="go-now">
+        <input type="checkbox" id="go-now" role="switch" aria-checked="false" aria-describedby="go-now-hint">
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-text"><span class="switch-label">Generate now</span><span id="go-now-hint" class="switch-hint">Ignores the idle hours for 6 h. A game, a busy GPU or your model still wins.</span></span>
+      </label>
+    </div>
+  </section>
+
+  <section class="block" aria-labelledby="h-coverage">
+    <h2 id="h-coverage">Coverage</h2>
+    <div id="coverage" class="coverage"></div>
+    <p id="tonight" class="tonight"></p>
+  </section>
+
+  <section class="block" aria-labelledby="h-review">
+    <h2 id="h-review">Needs a look <span id="review-n" class="count"></span></h2>
+    <p id="review-empty" class="subs-quiet" hidden></p>
+    <ul id="review-list" class="review-list"></ul>
+  </section>
+
+  <section class="block" aria-labelledby="h-missing">
+    <h2 id="h-missing">Missing</h2>
+    <input id="missing-q" class="search" type="search" placeholder="search a show or movie" autocomplete="off" aria-label="Search a show or movie">
+    <p id="missing-note" class="subs-quiet" hidden></p>
+    <ul id="missing-list" class="missing-list"></ul>
+  </section>
+
+  <details class="block recent" id="recent-box">
+    <summary><h2 class="inline">Recent</h2></summary>
+    <ul id="recent-list" class="recent-list"></ul>
+  </details>
+</main>
+
+<dialog id="sheet" class="sheet" aria-labelledby="sheet-title">
+  <form method="dialog" class="sheet-inner" id="sheet-form">
+    <h2 id="sheet-title" class="sheet-title">Regenerate</h2>
+    <p class="subs-quiet">Tell the generator what was wrong. It runs again on the PC when it is idle.</p>
+    <textarea id="sheet-text" rows="4" maxlength="500" placeholder="e.g. lines are a few seconds late in the second half"></textarea>
+    <p id="sheet-error" class="subs-error" hidden></p>
+    <div class="sheet-actions">
+      <button type="button" id="sheet-cancel" class="subs-btn">Cancel</button>
+      <button type="submit" id="sheet-send" class="subs-btn subs-primary">Queue it</button>
+    </div>
+  </form>
+</dialog>
+<footer class="foot">Nothing is written beside a video until it passes the gate. Generated subtitles carry a marker in their last line. Open in Plex to watch with a subtitle.</footer>
+</body>
+</html>

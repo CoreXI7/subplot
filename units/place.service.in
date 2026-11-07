@@ -1,0 +1,60 @@
+[Unit]
+Description=Subplot: place accepted subtitles beside their videos and act on decisions (the only media writer; loopback only)
+
+[Service]
+Type=oneshot
+User=@RUN_USER@
+Group=@RUN_GROUP@
+ExecStart=/usr/bin/python3 -I @CODE_DIR@/subplot/place.py
+Environment=SUBS_STATE=@STATE_DIR@
+Environment=SUBS_RULES=@CONFIG_DIR@/rules.json
+Environment=SUBS_ENV=@CONFIG_DIR@/.env
+Environment="SUBS_PLEX_DB=@PLEX_DB@"
+Environment=SUBS_PC=@PC_HOST@
+Environment=SUBS_PC_ROOT=@PC_ROOT@
+Environment=SUBS_HOST=@PUBLIC_HOST@
+Environment=SUBS_SOCK=@SOCKET@
+Environment=SUBS_SOCK_GROUP=@PROXY_GROUP@
+Environment=SUBS_MARKER_TAG=@MARKER_TAG@
+Environment="SUBS_USER_AGENT=@USER_AGENT@"
+Environment=SUBS_NAV_FILE=@CONFIG_DIR@/nav.json
+Environment=SUBS_OVERLAY=@OVERLAY_DIR@
+TimeoutStartSec=2h
+EnvironmentFile=@CONFIG_DIR@/.env
+BindPaths=@STATE_DIR@
+BindPaths=@MEDIA_ROOT@
+InaccessiblePaths=-@STATE_DIR@/tokens
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+IPAddressAllow=127.0.0.1
+IPAddressDeny=any
+MemoryMax=512M
+TasksMax=16
+CPUQuota=30%
+# sidecars 0644: any Plex uid can read them; state files set 0600 themselves
+UMask=0022
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=tmpfs
+BindReadOnlyPaths=@CODE_DIR@
+BindReadOnlyPaths=@CONFIG_DIR@
+InaccessiblePaths=-/run/docker.sock
+InaccessiblePaths=-/var/run/docker.sock
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @mount @debug
+
+[Install]
+WantedBy=multi-user.target

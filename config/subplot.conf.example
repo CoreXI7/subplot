@@ -1,0 +1,28 @@
+# Subplot settings, read by install.sh only. Copy to /etc/subplot/subplot.conf (or pass its path to install.sh).
+# Values: no spaces (except PLEX_DB), no quotes, no '%', '$' or backslashes. Each key's format is in tools/install.py.
+
+# The account the services run as (not root). The GPU PC's ssh alias must be in its ~/.ssh/config.
+RUN_USER=media
+CODE_DIR=/opt/subplot
+STATE_DIR=/var/lib/subplot
+CONFIG_DIR=/etc/subplot
+# A venv made with: python3 -m venv --copies /opt/subplot/venv && /opt/subplot/venv/bin/pip install -r requirements-sync.txt
+VENV=/opt/subplot/venv
+# Space-separated media mount points (the folders your Plex libraries live in).
+MEDIA_ROOTS=/mnt/media1 /mnt/media2
+# A regularly refreshed copy of Plex's library database (README: "The Plex DB copy").
+PLEX_DB=/var/backups/plex/library.db
+PC_HOST=gpu-pc
+PC_IP=10.0.0.50
+PC_ROOT=C:/Subplot
+# The board's unix socket, in a folder of its own (not /run: it is emptied at boot); your reverse proxy's group may open it.
+SOCKET=/var/lib/subplot-sock/board.sock
+PROXY_GROUP=www-data
+PUBLIC_HOST=subs.example.com
+# Optional:
+MARKER_TAG=subplot
+USER_AGENT=subplot v1.0
+UNIT_PREFIX=subplot
+OVERLAY_DIR=
+# Optional: extra mounts the services without media access must not see (space-separated).
+HIDE_PATHS=

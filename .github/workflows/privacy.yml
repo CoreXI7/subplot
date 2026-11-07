@@ -1,0 +1,32 @@
+name: privacy
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Privacy scan (tree and full history)
+        run: python3 tools/pre-push --scan --history
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests (stdlib)
+        run: |
+          set -e
+          for t in tests/test_*.py; do
+            case "$t" in tests/test_vad.py) continue;; esac
+            python3 "$t"
+          done
+      - name: Speech check tests
+        run: |
+          python3 -m pip install -r requirements-sync.txt
+          sudo apt-get install -y ffmpeg
+          python3 tests/test_vad.py

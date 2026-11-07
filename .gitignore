@@ -1,0 +1,11 @@
+.env
+config/subplot.conf
+config/rules.json
+config/nav.json
+state/
+venv/
+__pycache__/
+*.bak*
+*.pyc
+_brief/
+jobs-*.json

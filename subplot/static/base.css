@@ -1,0 +1,217 @@
+/* Base styles. Loaded before subs.css, which overrides the page skin. */
+
+:root {
+  color-scheme: dark;
+
+  /* Theme */
+  --bg: #080b14;
+  --card: #121a2b;
+  --line: #26324a;
+  --fg: #e8edf7;
+  --dim: #8b97ad;
+  --mute: #aab5c8;
+  --cyan: #86e4f0;
+  --green: #8fe6ad;
+  --yellow: #f4dd93;
+  --pink: #f6a9d2;
+  --purple: #b9a3fa;
+  --red: #f79e9e;
+  --focus: #8ecbff;
+
+  /* Type */
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+}
+
+h1, h2, h3 {
+  margin: 0 0 0.5em;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+p { margin: 0 0 0.75em; }
+
+a { color: var(--cyan); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Header */
+.top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px 4px;
+}
+
+.top > div { min-width: 0; }
+
+.logo {
+  margin: 0;
+  font-size: clamp(18px, 5vw, 24px);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.logo a { color: inherit; }
+.logo a:hover { text-decoration: none; }
+
+.summary {
+  margin: 4px 0 0;
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.fresh {
+  flex: 0 0 auto;
+  margin: 0;
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Tabs nav */
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  display: inline-flex;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(185, 163, 250, 0.06);
+  color: var(--mute);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: uppercase;
+  white-space: nowrap;
+  transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
+}
+
+.tab:hover {
+  border-color: rgba(185, 163, 250, 0.40);
+  background: rgba(185, 163, 250, 0.12);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+.tab[aria-current="page"] {
+  border-color: rgba(185, 163, 250, 0.55);
+  background: rgba(185, 163, 250, 0.16);
+  color: var(--fg);
+}
+
+.tab-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--yellow);
+  color: #1b1405;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Buttons: subs.css adds the page-specific skin */
+.subs-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.06em;
+  text-decoration: none;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 180ms ease, border-color 180ms ease, opacity 180ms ease;
+}
+
+.subs-btn:hover:not(:disabled) {
+  border-color: var(--purple);
+  background: rgba(185, 163, 250, 0.12);
+}
+
+.subs-btn:active:not(:disabled) { transform: translateY(1px); }
+.subs-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

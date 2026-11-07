@@ -1,0 +1,10 @@
+[Unit]
+Description=Subplot: ask OpenSubtitles four times a day (the budget caps the total; the scan chain also starts it)
+
+[Timer]
+OnCalendar=*-*-* 06,12,18,00:30:00
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

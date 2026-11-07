@@ -1,0 +1,7 @@
+faster-whisper>=1.1,<1.3
+ctranslate2>=4.4
+opencv-python-headless>=4.9
+numpy>=1.26
+av>=11
+nvidia-cublas-cu12>=12.8   # ctranslate2 on Windows loads cublas64_12.dll and cudnn from these wheels
+nvidia-cudnn-cu12>=9.5
