@@ -637,10 +637,17 @@ def make_server(sock=SOCK, group=None):
         srv = Server(sock, Handler)
     finally:
         os.umask(old)
+    # No chown here: the unit's syscall filter forbids it (SIGSYS). The installer makes the socket's folder setgid to the
+    # proxy's group, so the socket inherits that group; a mismatch is logged, never fixed by force.
     group = SOCK_GROUP if group is None else group
-    if group:
-        os.chown(sock, -1, grp.getgrnam(group).gr_gid)                 # the proxy's group may connect; nobody else
     os.chmod(sock, 0o660)
+    if group:
+        try:
+            want = grp.getgrnam(group).gr_gid
+        except KeyError:
+            want = None
+        if want is not None and os.stat(sock).st_gid != want:
+            C.log(f"board socket group is not {group}: make its folder setgid to that group (install.sh does)")
     return srv
 
 

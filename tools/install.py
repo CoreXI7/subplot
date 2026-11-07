@@ -318,7 +318,8 @@ def install(conf, written, run_group):
         raise Refused("SOCKET must live in a folder of its own, e.g. /var/lib/subplot-sock/board.sock")
     parent = _open_parent(sock_dir)
     try:
-        os.close(_own_dir(parent, os.path.basename(sock_dir), pw.pw_uid, grp.getgrnam(conf["PROXY_GROUP"]).gr_gid, 0o750, "the socket's folder"))
+        # setgid: the socket the board creates inherits the proxy's group (the board itself may not chown: syscall filter)
+        os.close(_own_dir(parent, os.path.basename(sock_dir), pw.pw_uid, grp.getgrnam(conf["PROXY_GROUP"]).gr_gid, 0o2750, "the socket's folder"))
     finally:
         os.close(parent)
     # units: all new files written next to their targets first, then renamed into place; any failure puts the old ones back

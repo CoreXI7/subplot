@@ -27,6 +27,7 @@ for a in tests/attack/*_attack.py; do SUBS_CODE=$PWD/subplot python3 "$a" | tail
 | test_progress.py | 14 | the live progress row: what it may show, its expiry, path redaction |
 | test_server.py | 17 | the board's API: host and origin checks, request limits, decisions only for files under review |
 | test_board.py | 19 | the socket's mode, path refusal, `api/config`, header tabs, the overlay folder |
+| test_board_seccomp.py | 1 | the real board starts and answers under the units' own syscall filter |
 | test_install.py | 33 | every `subplot.conf` rule, unit rendering, `--check` |
 | test_install_hardening.py | 10 | the installer's root-side guards: normal paths, no-follow folder creation, no taking over others' folders, units that can't ask for root |
 | test_hook.py | 16 | the privacy hook on throwaway repositories: contents, paths, renames, binaries, names, history |
@@ -48,8 +49,8 @@ The attack runners in `tests/attack/` throw hostile input at the real code and p
 Each safety rule was also broken on purpose to prove a test notices: the socket opened to everyone, the overlay following
 symlinks, a `%` accepted in a setting, the hook skipping author names, the double-slash check removed, generated files
 shifted, a disabled check that the halves agree, the speech detector failing silently, and in the installer: non-normal
-paths accepted, someone else's folder taken over, symlinks followed on the way to the state folder, and a tampered unit
-template rendered. Each made a test fail.
+paths accepted, someone else's folder taken over, symlinks followed on the way to the state folder, a tampered unit
+template rendered, and a chown in the board (which the syscall filter kills). Each made a test fail.
 
 ## What isn't covered
 
