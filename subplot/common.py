@@ -159,6 +159,10 @@ def done(entry):
         else:
             v = None
         row[k] = v
+    for k in ("extract_s", "pc_s"):                                     # generation timings: only on rows that have them
+        v = entry.get(k)
+        if isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 10 ** 6:
+            row[k] = v
     ensure_dir(STATE)
     fd = os.open(DONE_LOG, os.O_WRONLY | os.O_CREAT | os.O_APPEND | NOFOLLOW, 0o600)
     try:
@@ -830,6 +834,26 @@ def pc_override(now_t=None):
     return now_v < t <= now_v + 24 * 3600
 
 
+def inside_idle_hours(rules, now_local=None):
+    """Is now inside one of the rules' day-tagged idle hours? (Needs no probe: gen.py asks this before contacting the PC.)"""
+    t = now_local or datetime.datetime.now()
+    hhmm = t.strftime("%H:%M")
+    for span in rules.get("pc_idle", {}).get("hours", []):
+        m = HOURS.fullmatch(span) if isinstance(span, str) else None
+        if not m:
+            continue
+        a, b = span.rsplit(" ", 1)[-1].split("-")
+        if a <= b:
+            if a <= hhmm < b and span_covers_day(m.group(1), m.group(2), t.weekday()):
+                return True
+        else:                                                           # crosses midnight: the span belongs to the day it starts on
+            if hhmm >= a and span_covers_day(m.group(1), m.group(2), t.weekday()):
+                return True
+            if hhmm < b and span_covers_day(m.group(1), m.group(2), (t.weekday() - 1) % 7):
+                return True
+    return False
+
+
 def pc_idle(rules, probe, now_local=None, ignore=(), override=False):
     """(idle, why) from a probe {"gpu_util", "gpu_mem_used_mb", "gpu_mem_total_mb", "busy_procs", "processes"} and the rules'
     hours, blocked processes, GPU utilisation, other GPU users and free VRAM. `ignore` names GPU users to overlook (our worker);
@@ -838,22 +862,7 @@ def pc_idle(rules, probe, now_local=None, ignore=(), override=False):
     idle_cfg = rules.get("pc_idle", {})
     if not isinstance(probe, dict):
         return False, "no probe"
-    hhmm = t.strftime("%H:%M")
-    inside = False
-    for span in idle_cfg.get("hours", []):
-        m = HOURS.fullmatch(span) if isinstance(span, str) else None
-        if not m:
-            continue
-        a, b = span.rsplit(" ", 1)[-1].split("-")
-        if a <= b:
-            if a <= hhmm < b and span_covers_day(m.group(1), m.group(2), t.weekday()):
-                inside = True
-        else:                                                           # crosses midnight: the span belongs to the day it starts on
-            if hhmm >= a and span_covers_day(m.group(1), m.group(2), t.weekday()):
-                inside = True
-            if hhmm < b and span_covers_day(m.group(1), m.group(2), (t.weekday() - 1) % 7):
-                inside = True
-    if not inside and not override:
+    if not inside_idle_hours(rules, t) and not override:
         return False, "outside the idle hours"
     procs = probe.get("processes")
     if not isinstance(procs, list):

@@ -7,7 +7,7 @@ import calendar, json, math, os, pathlib, re, shutil, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as C
 
-PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pc", "probe.ps1")
+PROBE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pc", "probe.ps1")   # the repo's pc/, beside subplot/
 FFMPEG_TIMEOUT, PC_TIMEOUT, SSH_TIMEOUT = 300, 40 * 60, 60
 AUDIO_CAP, FRAME_CAP, SRT_CAP, RESULT_CAP = 60 * 1024 * 1024, 200 * 1024, 2 * 1024 * 1024, 4096
 FRAMES = 12
@@ -382,8 +382,13 @@ def main():
     rules = C.load_rules()
     if rules is None:
         return 0
-    probe = probe_pc(run)                                   # module-level `run` (real_run) so tests can patch it
     override = C.pc_override()
+    if not override and not C.inside_idle_hours(rules):                 # (runs every minute: no SSH to the PC outside the hours)
+        prev = C.read_json(C.PC_STATUS, 8192) or {}
+        C.write_json(C.PC_STATUS, {"at": C.now(), "idle": False, "why": "outside the idle hours", "gpu_util": None,
+                                   "idle_since": None, "last_run": prev.get("last_run")})
+        return 0
+    probe = probe_pc(run)                                   # module-level `run` (real_run) so tests can patch it
     idle, why = C.pc_idle(rules, probe, override=override)
     prev = C.read_json(C.PC_STATUS, 8192) or {}
     status = {"at": C.now(), "idle": idle, "why": why + (" (generate now)" if override and idle else ""), "gpu_util": (probe or {}).get("gpu_util"),
@@ -434,6 +439,7 @@ def main():
     C.set_current(step="gen", phase="extracting", key=key, lang=lang, started_at=C.now(), **_meta(item))
     try:
         ok, why, duration_ms = extract(video, job_dir, rules, run)
+        timing = {"extract_s": int(time.monotonic() - started)}
         C.set_current(of_ms=duration_ms if isinstance(duration_ms, int) and duration_ms > 0 else None)
         if not ok:
             mark_failure(key, why); C.done({"step": "gen", "key": key, "lang": lang, "result": "failed", "why": why, **_meta(item)})
@@ -441,7 +447,9 @@ def main():
         task = "transcribe" if lang == "en" else "translate"
         C.write_json(os.path.join(job_dir, "job.json"), {"key": key, "lang": lang, "task": task,
                                                           "audio_lang": (item.get("audio") or [{}])[0].get("lang"), "duration_ms": duration_ms})
+        pc_started = time.monotonic()
         ok, why = run_pc(key, run, rules)
+        timing["pc_s"] = int(time.monotonic() - pc_started)
         C.set_current(phase="checking")
         if not ok:
             if why.startswith("preempted"):
@@ -468,7 +476,7 @@ def main():
         C.write_bytes(os.path.join(C.INCOMING, f"{key}.{lang}.srt"), C.write_srt(cues, (key, source, result["confidence"])))
         C.write_json(os.path.join(C.INCOMING, f"{key}.{lang}.json"), {"key": key, "lang": lang, "source": source,
                      "confidence": result["confidence"], "no_speech_ratio": result["no_speech_ratio"], "at": C.now(), "step": "gen"})
-        C.done({"step": "gen", "key": key, "lang": lang, "result": "queued", "source": source, "confidence": result["confidence"], **_meta(item)})
+        C.done({"step": "gen", "key": key, "lang": lang, "result": "queued", "source": source, "confidence": result["confidence"], **timing, **_meta(item)})
     finally:
         C.clear_current()
         shutil.rmtree(job_dir, ignore_errors=True)

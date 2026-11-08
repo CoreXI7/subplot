@@ -1,9 +1,9 @@
 [Unit]
-Description=Subplot: generate on the PC every 10 min when idle
+Description=Subplot: generate on the PC back to back while it is idle (the next run starts 1 min after the last ends)
 
 [Timer]
 OnBootSec=10min
-OnUnitActiveSec=10min
+OnUnitInactiveSec=1min
 Persistent=true
 
 [Install]

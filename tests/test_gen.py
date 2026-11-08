@@ -62,6 +62,39 @@ class FakeProc:
 
 
 class GenTests(unittest.TestCase):
+    def test_probe_script_exists(self):
+        """The PC probe is read from the repo's pc/ folder; a wrong path means 'no probe' forever and no generation."""
+        self.assertTrue(os.path.isfile(gen.PROBE), gen.PROBE)
+
+    def test_outside_hours_never_contacts_the_pc(self):
+        """Back-to-back runs start every minute: outside the idle hours gen.main must not SSH to the PC at all."""
+        rules = {"pc_idle": {"hours": ["mon-sun 03:00-03:01"]}, "generate": {"max_hours_per_night": 6}}
+        calls = []
+        with mock.patch.object(C, "load_rules", return_value=rules), mock.patch.object(C, "pc_override", return_value=None), \
+                mock.patch.object(C, "inside_idle_hours", return_value=False), \
+                mock.patch.object(gen, "run", side_effect=lambda *a, **k: calls.append(a) or (1, b"", b"")):
+            self.assertEqual(gen.main(), 0)
+        self.assertEqual(calls, [])
+        self.assertEqual((C.read_json(C.PC_STATUS, 8192) or {}).get("why"), "outside the idle hours")
+
+    def test_inside_idle_hours(self):
+        import datetime
+        r = {"pc_idle": {"hours": ["mon-fri 09:00-17:00", "sat 23:00-02:00"]}}
+        mon, sat, sun = datetime.datetime(2026, 11, 9, 10, 0), datetime.datetime(2026, 11, 7, 23, 30), datetime.datetime(2026, 11, 8, 1, 30)
+        self.assertTrue(C.inside_idle_hours(r, mon))
+        self.assertFalse(C.inside_idle_hours(r, mon.replace(hour=17)), "the end is exclusive")
+        self.assertTrue(C.inside_idle_hours(r, sat), "a span past midnight starts on its own day")
+        self.assertTrue(C.inside_idle_hours(r, sun), "and runs into the next morning")
+        self.assertFalse(C.inside_idle_hours(r, sun.replace(hour=3)))
+
+    def test_done_keeps_timings_only_when_given(self):
+        C.done({"step": "gen", "key": "ep-1", "result": "queued", "extract_s": 12, "pc_s": 95})
+        C.done({"step": "gen", "key": "ep-2", "result": "failed", "extract_s": "x", "pc_s": True})
+        import json as _j
+        rows = [_j.loads(l) for l in open(C.DONE_LOG)][-2:]
+        self.assertEqual((rows[0]["extract_s"], rows[0]["pc_s"]), (12, 95))
+        self.assertNotIn("extract_s", rows[1]); self.assertNotIn("pc_s", rows[1])
+
     def test_extract_needs_frames(self):
         out = os.path.join(TMPHOME, "job-noframes")
         ok, why, duration = gen.extract("/nonexistent/video.mkv", out, {}, fake_run_factory(frames_ok=False))
