@@ -215,7 +215,7 @@ def scan(db_path, rules):
             else:
                 status = "ok"
             sub_langs = {s["lang"] for s in subs if s["lang"]}
-            en_present = "en" in sub_langs
+            en_present = any(l == "en" or l.startswith("en-") for l in sub_langs)      # Plex tags 'en-us', 'en-gb' too
             es_present = "es" in sub_langs or "es-419" in sub_langs
             item_views = dict(views_by_item.get(it_id, {}))
             show_plex_id = int(show_id) if show_id is not None else None
@@ -271,7 +271,7 @@ def scan(db_path, rules):
             else:
                 status = "ok"
             sub_langs = {s["lang"] for s in subs if s["lang"]}
-            en_present = "en" in sub_langs
+            en_present = any(l == "en" or l.startswith("en-") for l in sub_langs)      # Plex tags 'en-us', 'en-gb' too
             es_present = "es" in sub_langs or "es-419" in sub_langs
             item_views = dict(views_by_item.get(it_id, {}))
             secondary_watched = bool(secondary_set & set(item_views))

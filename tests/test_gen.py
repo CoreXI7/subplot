@@ -105,6 +105,29 @@ class GenTests(unittest.TestCase):
         self.assertEqual((ok, why), (True, ""))
         self.assertEqual(len(os.listdir(os.path.join(out, "frames"))), gen.FRAMES)
 
+    def test_extract_takes_the_english_audio_track(self):
+        """Dual-audio anime puts Japanese first: the English track (audio index 1 here) is the one sent to Whisper."""
+        out = tempfile.mkdtemp(dir=self.tmp) if hasattr(self, "tmp") else tempfile.mkdtemp()
+        base = fake_run_factory(True)
+        seen = []
+        def run(args, timeout):
+            if "stream_tags=language" in args:
+                return 0, b"jpn\neng\n", ""
+            if args[-1].endswith(".opus"):
+                seen.append(args)
+            return base(args, timeout)
+        ok, why, _ = gen.extract("/media/x.mkv", out, {}, run)
+        self.assertTrue(ok, why)
+        self.assertIn("0:a:1", seen[0])
+        self.assertEqual(gen.english_audio_index("/media/x.mkv", lambda a, t: (0, b"spa\n", "")), 0)
+
+    def test_pick_item_skips_items_with_region_tagged_english_subs(self):
+        item = {"status": "ok", "library": "Anime", "need": ["en"], "views": {"alice": 3}, "added_at": 1,
+                "audio": [{"lang": "ja-jp"}, {"lang": "en-us"}], "subs": [{"lang": "en-us", "kind": "text"}]}
+        self.assertIsNone(gen.pick_item({"items": {"ep-1": item}}, {}, {}, {}, set(), []))
+        item["subs"] = []
+        self.assertEqual(gen.pick_item({"items": {"ep-1": item}}, {}, {}, {}, set(), [])[0], "ep-1")
+
     def test_watcher_yields_to_rules_process(self):
         """The yield_to list from rules reaches the watcher: a configured process working the GPU preempts the worker."""
         probes = iter([{"gpu_util": 90, "busy_procs": ["lmstudio.exe"], "processes": [], "game_procs": []}])

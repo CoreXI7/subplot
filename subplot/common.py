@@ -523,7 +523,11 @@ def validate_subtitle(raw, lang):
             return None, "cues out of order"
         if end - start > MAX_CUE_MS:
             return None, "cue longer than 60 s"
+        if end >= 100 * 3600 * 1000:
+            return None, "cue past 100 h"
         last_start = start
+        if end == start:
+            continue                                            # a zero-length cue shows nothing, and write_srt refuses it
         body = TAG_ANY.sub(lambda m: m.group(0) if TAG_OK.fullmatch(m.group(0)) else "", body)
         if CONTROL.search(body.replace("\t", "")):
             return None, "control characters"
@@ -534,7 +538,42 @@ def validate_subtitle(raw, lang):
             clean.append((start, end, body))
     if not clean:
         return None, "no text"
+    wrong = wrong_language(clean, lang)
+    if wrong:
+        return None, wrong
     return clean, ""
+
+
+_EN_WORDS = frozenset("the you and to is it that what of this i'm don't are have was with for your we he she they just know "
+                      "can not be it's there will get right this that's i'll i've you're".split())
+_ES_WORDS = frozenset("que de el la los las y es en lo por para una un con qué está pero mi tu yo sí eso esto aquí cómo muy "
+                      "más del al se le su también bien nada puedo vamos tengo hay estoy".split())
+_WORD = re.compile(r"[a-záéíóúñü']+")
+
+
+def wrong_language(cues, lang):
+    """Refusal reason when the text plainly is not in `lang`, else ''. Only English and Spanish targets are checked. A file
+    labelled English that is really Japanese (Whisper on the wrong audio track) or Spanish must never be placed as '.en'.
+    Needs enough text to judge (40 letters, 20 known words); short or odd files pass to the other checks."""
+    base = str(lang or "").lower().split("-")[0]
+    if base not in ("en", "es"):
+        return ""
+    text = " ".join(body for _, _, body in cues)
+    text = TAG_ANY.sub(" ", text)
+    letters = [ch for ch in text if ch.isalpha()]
+    if len(letters) >= 40:
+        latin = sum(1 for ch in letters if ord(ch) < 0x250)
+        if latin / len(letters) < 0.8:
+            return "text is not in the Latin alphabet (wrong language)"
+    words = _WORD.findall(text.lower())
+    en = sum(1 for w in words if w in _EN_WORDS)
+    es = sum(1 for w in words if w in _ES_WORDS)
+    if en + es >= 20:
+        if base == "en" and es > en * 1.5:
+            return "text reads as Spanish, not English"
+        if base == "es" and en > es * 1.5:
+            return "text reads as English, not Spanish"
+    return ""
 
 
 def ass_to_srt(text):

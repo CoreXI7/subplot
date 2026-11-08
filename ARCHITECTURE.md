@@ -135,7 +135,7 @@ The rating is 0 for most files, so it never gates alone. The pick must reach `mi
 
 **Download.** `POST /download` with the `file_id` returns a link that must be on `*.opensubtitles.com`. The file is fetched with a 2 MiB cap; one redirect is followed when it stays on that domain. Errors are stored as reason codes.
 
-**Stored.** `validate_subtitle` runs on the downloaded bytes. A refusal is logged as `rejected` and the item's `asked_at` is set. An accepted file is written to `incoming/<key>.<lang>.srt` with the marker as its last line, `source = os:<file_id>` and confidence = score / 100, plus `incoming/<key>.<lang>.json` with key, language, source, confidence, score, the `hi` flag, time and step. `asked_at` is set either way. Found files are gated by `min_score` and the sync check, not by `thresholds.keep`, which applies to generated text.
+**Stored.** `validate_subtitle` runs on the downloaded bytes. It drops zero-length cues and refuses a file labelled `en` or `es` whose text is plainly another language (under 80 % Latin letters, or the other language's common words winning 1.5 to 1 over at least 20 known words); a cue the writer still refuses fails that file only, never the run. A refusal is logged as `rejected` and the item's `asked_at` is set. An accepted file is written to `incoming/<key>.<lang>.srt` with the marker as its last line, `source = os:<file_id>` and confidence = score / 100, plus `incoming/<key>.<lang>.json` with key, language, source, confidence, score, the `hi` flag, time and step. `asked_at` is set either way. Found files are gated by `min_score` and the sync check, not by `thresholds.keep`, which applies to generated text.
 
 ## sync.py
 
@@ -258,7 +258,7 @@ The job round trip:
    counts) by views, library priority and `added_at`. Skip `status != ok`, decided `exclude`, `burned_in`,
    `gen_failed ≥ 2`, items whose placed subtitle for the language still exists (unless a request asks), items with a pair for the language in incoming/queue/review, items with an image subtitle in the
    language, and `en` items without an English audio track.
-2. On the server: ffmpeg makes `audio.opus` (mono, 16 kHz, 32 kb/s, 300 s timeout, ≤ 60 MiB) and 12 frames from the
+2. On the server: ffmpeg makes `audio.opus` from the first English-tagged audio track, else the first track (mono, 16 kHz, 32 kb/s, 300 s timeout, ≤ 60 MiB) and 12 frames from the
    bottom 25 % of the picture at 5..95 % of the duration, 640 px wide, JPEG q4, ≤ 200 KiB each. Fewer than 6 usable
    frames fails the job (the burned-in check needs them). `job.json` carries `key`, `lang`, `task`
    (`transcribe` or `translate`), `audio_lang` and `duration_ms`; nothing else is sent.

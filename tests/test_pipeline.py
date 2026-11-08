@@ -286,6 +286,15 @@ class SubsPipelineTest(unittest.TestCase):
         self.assertTrue(any(s.get("codec") == "pgs" for s in row.get("subs", [])))
         self.assertNotIn("en", row.get("need", []))
 
+    def test_region_tagged_english_subs_count_as_present(self):
+        """Plex tags many embedded tracks 'en-us': those are English subtitles, so the item needs nothing."""
+        db = sqlite3.connect(str(common.PLEX_DB_NIGHTLY))
+        db.execute("UPDATE media_streams SET language = 'en-us' WHERE id = 3")
+        db.commit()
+        db.close()
+        self._run(scan)
+        self.assertNotIn("en", self._row(1001).get("need", []))
+
     def test_need_es_only_for_listed_users(self):
         self._run(scan)
         cartoon = self._row(2001).get("need", [])

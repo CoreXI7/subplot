@@ -426,6 +426,17 @@ def main():
             C.write_json(json_path, {"key": key, "lang": lang, "source": source, "confidence": confidence,
                          "score": best.get("score", 0), "hi": best.get("hi", False), "at": C.now(), "step": "find"})
             C.write_bytes(srt_path, C.write_srt(cues, (key, source, confidence)))
+        except ValueError as exc:                                          # the writer refused a cue: this file only, never the run
+            for pth in (srt_path, json_path):
+                try:
+                    os.unlink(pth)
+                except OSError:
+                    pass
+            C.mark(key, asked_at=time.time())
+            C.done({"step": "find", "key": key, "lang": lang, "result": "rejected", "why": f"writer: {exc}"[:60], **meta})
+            if stop:
+                break
+            continue
         except OSError as exc:
             for pth in (srt_path, json_path):                              # never leave half a pair behind
                 try:

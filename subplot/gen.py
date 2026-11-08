@@ -155,6 +155,8 @@ def pick_item(library, rules, marks_all, decisions_all, busy_keys, requests):
         if lang == "en":
             if not item.get("audio"):
                 return False                                                # nothing to transcribe
+            if any(ENGLISH_TAG.match(str(sub.get("lang") or "")) for sub in (item.get("subs") or []) if isinstance(sub, dict)):
+                return False                                                # it has English subs ('en-us' too), whatever 'need' says
             tags = [str(a.get("lang") or "").lower() for a in (item.get("audio") or []) if isinstance(a, dict)]
             tagged = [t for t in tags if t and t not in ("und", "unknown", "mis", "zxx")]
             if tagged and not any(t.startswith("en") for t in tagged):       # every tagged track is another language
@@ -183,6 +185,23 @@ def pick_item(library, rules, marks_all, decisions_all, busy_keys, requests):
     return (best[1], "en", None) if best else None
 
 
+ENGLISH_TAG = re.compile(r"^(en|eng)(-|$)", re.I)
+
+
+def english_audio_index(video, run):
+    """Index (among the audio streams) of the first English-tagged audio track, else 0. Dual-audio files often put the
+    Japanese or Spanish track first; Whisper must hear the English one, or a '.en' file comes out in that language."""
+    rc, out, _ = run([C.FFPROBE, "-v", "error", "-select_streams", "a", "-show_entries", "stream_tags=language",
+                      "-of", "csv=p=0", video], 60)
+    if rc != 0:
+        return 0
+    langs = out.decode("utf-8", "replace").splitlines() if isinstance(out, (bytes, bytearray)) else str(out or "").splitlines()
+    for i, lang in enumerate(langs[:32]):
+        if ENGLISH_TAG.match(lang.strip().strip(",")):
+            return i
+    return 0
+
+
 def extract(video, out_dir, rules, run):
     """audio.opus (mono 16 kHz 32 kb/s) and FRAMES jpegs of the bottom 25 % of the picture at 5..95 % of the duration into
     out_dir (C.ensure_dir). ffprobe gives the duration. Caps: AUDIO_CAP, FRAME_CAP each. Returns (ok, why, duration_ms)."""
@@ -196,8 +215,9 @@ def extract(video, out_dir, rules, run):
     if rc != 0 or duration_ms <= 0:
         return False, "ffprobe failed", 0
     audio = os.path.join(out_dir, "audio.opus")
-    rc, _, err = run([C.FFMPEG, "-nostdin", "-loglevel", "error", "-y", "-i", video, "-vn", "-ac", "1", "-ar", "16000",
-                      "-c:a", "libopus", "-b:a", "32k", audio], FFMPEG_TIMEOUT)
+    track = english_audio_index(video, run)
+    rc, _, err = run([C.FFMPEG, "-nostdin", "-loglevel", "error", "-y", "-i", video, "-map", f"0:a:{track}", "-vn", "-ac", "1",
+                      "-ar", "16000", "-c:a", "libopus", "-b:a", "32k", audio], FFMPEG_TIMEOUT)
     if rc != 0:
         return False, f"ffmpeg audio exit {rc}", duration_ms
     try:

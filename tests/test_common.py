@@ -320,5 +320,59 @@ class CommonTests(unittest.TestCase):
             self.assertEqual(kept.get("media_roots"), accepted["media_roots"])
 
 
+
+class WrongLanguageTests(unittest.TestCase):
+    """A '.en' file must read as English: Whisper on a Japanese or Spanish audio track once produced '.en' files that were not."""
+    def _srt(self, lines):
+        return "".join(f"{i + 1}\n00:00:{i:02d},000 --> 00:00:{i:02d},900\n{t}\n\n" for i, t in enumerate(lines)).encode()
+
+    def test_japanese_text_refused_as_english(self):
+        raw = self._srt(["洗 濯 もう 終 わ る から、 す", "ぐ 股 に 戻 る よ", "この 泉、 魔 法 が か か ってる から"] * 5)
+        cues, why = C.validate_subtitle(raw, "en")
+        self.assertIsNone(cues)
+        self.assertIn("wrong language", why)
+
+    def test_spanish_text_refused_as_english(self):
+        raw = self._srt(["Esperen, ¿ustedes se conocen?", "Ella me ayudó a hallar mi camino a casa.",
+                         "Pero yo no sé qué es lo que está pasando aquí.", "Vamos, hay que irnos con ella para la nave."] * 4)
+        cues, why = C.validate_subtitle(raw, "en")
+        self.assertIsNone(cues)
+        self.assertIn("Spanish", why)
+        self.assertIsNotNone(C.validate_subtitle(raw, "es-419")[0])
+
+    def test_english_text_passes_and_short_files_are_not_judged(self):
+        raw = self._srt(["I don't know what you want from me.", "It's the way that we have to do this.",
+                         "You're right, and that is what they said to him."] * 4)
+        self.assertIsNotNone(C.validate_subtitle(raw, "en")[0])
+        self.assertIsNotNone(C.validate_subtitle(self._srt(["¡Hola!", "Sí."]), "en")[0])
+        self.assertIsNotNone(C.validate_subtitle(self._srt(["こんにちは"] * 20), "ja")[0])
+
+class ValidatorWriterAgreeTests(unittest.TestCase):
+    """Whatever validate_subtitle accepts, write_srt must be able to write: a mismatch (a zero-length cue) once crashed every
+    find run on the same file, so OpenSubtitles lookups stopped for a day."""
+    def test_zero_length_cue_is_dropped(self):
+        raw = b"1\n00:00:01,000 --> 00:00:01,000\nnothing\n\n2\n00:00:02,000 --> 00:00:03,000\nHello there.\n\n"
+        cues, why = C.validate_subtitle(raw, "en")
+        self.assertEqual([c[2] for c in cues], ["Hello there."])
+        C.write_srt(cues, ("ep-1", "os:1", 0.9))
+
+    def test_random_odd_files_never_break_the_writer(self):
+        import random
+        rnd = random.Random(7)
+        for _ in range(400):
+            n, t, parts = rnd.randint(1, 12), 0, []
+            for i in range(n):
+                t += rnd.choice([0, 0, 1, 500, 2000])
+                d = rnd.choice([0, 0, 1, 999, 4000, 61000])
+                parts.append("%d\n%s --> %s\n%s\n" % (i + 1, self._ts(t), self._ts(t + d), rnd.choice(["Hi.", "", "<i>ok</i>", "  ", "♪"])))
+            cues, why = C.validate_subtitle("\n".join(parts).encode(), "en")
+            if cues is not None:
+                C.write_srt(cues, ("ep-1", "os:1", 0.9))
+
+    @staticmethod
+    def _ts(ms):
+        return "%02d:%02d:%02d,%03d" % (ms // 3600000, ms // 60000 % 60, ms // 1000 % 60, ms % 1000)
+
+
 if __name__ == "__main__":
     unittest.main()
