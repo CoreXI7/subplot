@@ -99,6 +99,7 @@ def _write_fixtures():
                       "title": "Movie", "status": "ok",
                       "path": os.path.join(MEDIA_ROOT, "Movie.mkv"), "need": ["en"]}}
     _write_json(LIBRARY, {"at": _now(), "items": items})
+    C.write_board_index({"at": _now(), "items": items})   # the board reads its own copy (2026-11-08)
     _write_json(COVERAGE, {"at": _now(), "stale": False, "libraries": {
         "Shows": {"items": 2, "en": 0, "es": 0, "none": 2, "image_only": 0, "generatable": 2},
         "Hentai": {"items": 9, "en": 0, "es": 0, "none": 9, "image_only": 0, "generatable": 9}}})

@@ -324,6 +324,13 @@ def _mark_stale():
 
 
 def main():
+    if sys.argv[1:] == ["--board-index"]:                                  # rebuild only the board's copy from library.json
+        library = C.read_json(C.LIBRARY, 200 * 1024 * 1024)
+        if not isinstance(library, dict):
+            C.log("no library.json yet; run a scan first")
+            return 1
+        C.write_board_index(library)
+        return 0
     rules = C.load_rules()
     if rules is None:
         C.log("no valid rules; nothing scanned")
@@ -347,6 +354,7 @@ def main():
         _mark_stale()
         return 0
     C.write_json(C.LIBRARY, library)
+    C.write_board_index(library)
     C.write_json(C.COVERAGE, coverage)
     C.append_log(C.ACTION_LOG, f"scan items={len(library.get('items', {}))} generatable={coverage.get('generatable_total')}")
     return 0

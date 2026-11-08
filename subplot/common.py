@@ -28,6 +28,8 @@ FFMPEG = os.environ.get("SUBS_FFMPEG", "/usr/bin/ffmpeg")
 FFPROBE = os.environ.get("SUBS_FFPROBE", "/usr/bin/ffprobe")
 
 LIBRARY = os.path.join(STATE, "library.json")
+BOARD_INDEX = os.path.join(STATE, "board-index.json")    # library.json cut to the fields the page shows (scan writes both)
+BOARD_FIELDS = ("key", "plex_id", "kind", "library", "show_plex_id", "show", "title", "season", "episode", "year", "need", "status")
 COVERAGE = os.path.join(STATE, "coverage.json")
 PLEX_DB_COPY = os.path.join(STATE, "plex.db")
 RULES_LAST_GOOD = os.path.join(STATE, "rules.last-good.json")
@@ -132,7 +134,8 @@ def redact(text):
 
 
 def log(msg):
-    print(f"subs: {redact(msg)}"[:2000], file=sys.stderr, flush=True)
+    sys.stderr.write(f"subs: {redact(msg)}"[:2000] + "\n")   # one write: lines from the board's threads never mix
+    sys.stderr.flush()
 
 
 def append_log(path, line):
@@ -973,3 +976,11 @@ def gpu_busy_others(probe, ignore=()):
         return []
     skip = {str(x).lower() for x in ignore}
     return sorted({str(n) for n in names if isinstance(n, str) and n.lower() not in skip})
+
+
+def write_board_index(library):
+    """The board's copy of the library: only BOARD_FIELDS (no paths, tracks or ids). The full library parses to ~470 MB
+    in Python for 55k items, over the board's 512 MB cap; this one to ~80 MB (2026-11-08)."""
+    items = library.get("items") if isinstance(library, dict) and isinstance(library.get("items"), dict) else {}
+    write_json(BOARD_INDEX, {"at": library.get("at") if isinstance(library, dict) else None,
+                             "items": {k: {f: v[f] for f in BOARD_FIELDS if f in v} for k, v in items.items() if isinstance(v, dict)}})

@@ -3,7 +3,7 @@
 decisions/ and requests/; media inaccessible). ARCHITECTURE.md "The board". It listens only on a unix socket (0660, group
 SUBS_SOCK_GROUP: the reverse proxy, which signs the owner in). No payload ever carries a host path or a row of the excluded
 library; a decision is accepted only for a key with a review file (exclude: any library row); pending requests are capped."""
-import calendar, fcntl, grp, http.server, json, math, os, re, socketserver, stat, sys, time, urllib.parse
+import calendar, fcntl, grp, http.server, json, math, os, re, socket, socketserver, stat, sys, threading, time, urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as C
@@ -38,8 +38,19 @@ HEADERS = {
 _cache = {"at": 0.0, "key": None, "library": None, "rules": None}
 _marks_cache = {"mtime": None, "data": {}}
 _review_cache = {"mtime": None, "rows": None}
+_request_lock = threading.Lock()                                       # handle_request: two at once can't both pass the checks
+_cache_lock = threading.RLock()                                        # the board answers on several threads: one cache refill at a time
 
 
+def _locked(fn):
+    def wrapper(*a, **k):
+        with _cache_lock:
+            return fn(*a, **k)
+    wrapper.__name__, wrapper.__doc__ = fn.__name__, fn.__doc__
+    return wrapper
+
+
+@_locked
 def all_marks():
     """{key: marks dict} for every marks/<key>.json, re-read only when the folder's mtime changes (55k items poll every 30 s)."""
     try:
@@ -61,19 +72,21 @@ def all_marks():
                 data[key] = d
     _marks_cache.update({"mtime": mtime, "data": data})
     return data
-PUBLIC_ITEM_FIELDS = ("key", "plex_id", "kind", "library", "show_plex_id", "show", "title", "season", "episode", "year", "need", "status")
+PUBLIC_ITEM_FIELDS = C.BOARD_FIELDS
 
 
+@_locked
 def _library():
-    """library.json and rules, re-read when their mtimes change (checked at most every CACHE_S seconds)."""
+    """The board's library copy (board-index.json, never the full library.json: that one would not fit the board's memory
+    cap) and rules, re-read when their mtimes change (checked at most every CACHE_S seconds)."""
     if time.monotonic() - _cache["at"] < CACHE_S and _cache["library"] is not None:
         return _cache["library"], _cache["rules"]
     try:
-        key = (os.lstat(C.LIBRARY).st_mtime_ns, os.lstat(C.RULES).st_mtime_ns)
+        key = (os.lstat(C.BOARD_INDEX).st_mtime_ns, os.lstat(C.RULES).st_mtime_ns)
     except OSError:
         key = ("missing", time.time())                                   # never cache a failed stat: retry next time
     if key != _cache["key"] or _cache["library"] is None:
-        _cache["library"] = C.read_json(C.LIBRARY, 200 * 1024 * 1024) or {"items": {}}
+        _cache["library"] = C.read_json(C.BOARD_INDEX, 64 * 1024 * 1024) or {"items": {}}
         rules = C.load_rules()
         _cache["rules"] = rules if rules is not None else (_cache["rules"] or {})   # never fail open on a bad rules file
         _cache["key"] = key
@@ -106,6 +119,7 @@ def _pub(v):
     return None
 
 
+@_locked
 def _review_rows(library, rules):
     try:
         mtime = os.lstat(C.REVIEW).st_mtime_ns
@@ -349,6 +363,11 @@ def handle_request(body):
         target = {"show": show}
     else:
         return 400, {"why": "key or show required"}
+    with _request_lock:                                                   # count, de-duplicate and queue as one step
+        return _queue_request(kind, target, body)
+
+
+def _queue_request(kind, target, body):
     pending = C.requests_pending()
     if len(pending) >= C.MAX_REQUESTS:
         return 409, {"why": "too many requests waiting; let the services catch up"}
@@ -412,7 +431,15 @@ def handle_decision(body):
     note = C.redact(note)[:500] if isinstance(note, str) else ""
     lock = os.open(os.path.join(C.DECISIONS, key + ".lock"), os.O_RDWR | os.O_CREAT | C.NOFOLLOW, 0o600)
     try:
-        fcntl.flock(lock, fcntl.LOCK_EX)                                   # shared with place.py: never mid-mutation
+        give_up = time.monotonic() + 10                                   # shared with place.py: never mid-mutation;
+        while True:                                                       # never waited on forever (a thread and a place each)
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > give_up:
+                    return 503, {"why": "busy with this item right now; try again in a minute"}
+                time.sleep(0.05)
         C.write_json(os.path.join(C.DECISIONS, key + ".json"), {"decision": decision, "note": note, "at": C.now(), "by": "page"})
     finally:
         os.close(lock)
@@ -498,7 +525,13 @@ class Handler(signin.SignIn, http.server.BaseHTTPRequestHandler):
             self.reply(400, {"why": "bad path"}); return None             # never decoded, so nothing can sneak past this
         return path
 
+    def read_done(self):
+        """The whole request is in: the server's read deadline no longer applies to this connection."""
+        if hasattr(self.server, "read_done"):
+            self.server.read_done(self.request)
+
     def do_GET(self):
+        self.read_done()                                                  # (a GET has no body: the request line and headers are in)
         path = self.checked()
         if path is None:
             return
@@ -559,6 +592,7 @@ class Handler(signin.SignIn, http.server.BaseHTTPRequestHandler):
         if n < 0 or n > LIMIT:
             return self.reply(413, {"why": "body too large"})
         raw = self.rfile.read(n)
+        self.read_done()
         try:
             body = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
@@ -578,9 +612,78 @@ class Handler(signin.SignIn, http.server.BaseHTTPRequestHandler):
         self.reply(405 if code == 501 else code, {"why": "method not allowed" if code == 501 else (message or "error")})
 
 
-class Server(socketserver.UnixStreamServer):
+class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    """Several connections at once, each with deadlines (ported from Fishbowl's server, 2026-11-08). With one thread and
+    only a read timeout (which restarts with every byte), a client trickling a request a byte at a time through a proxy
+    that passes requests on as they arrive could hold the board, sign-in page included, for hours. Now: at most
+    MAX_CONN connections; one still sending its request after READ_DEADLINE seconds, or any after DEADLINE, is cut;
+    when full, the oldest one still sending its request makes room. (TasksMax in the unit allows 32 tasks.)"""
     allow_reuse_address = True
-    request_queue_size = 16
+    daemon_threads = True
+    request_queue_size = 64                                               # (a burst of connections waits to be accepted, not refused)
+    MAX_CONN, READ_DEADLINE, DEADLINE = 16, 10, 60
+    _conn_lock, _conns, _reaping = threading.Lock(), {}, []   # request -> [opened, still reading, read by, done by]
+
+    def verify_request(self, request, client_address):
+        if not Server._reaping:
+            Server._reaping.append(True)
+            threading.Thread(target=Server._reaper, daemon=True).start()
+        now = time.monotonic()
+        with self._conn_lock:
+            if len(self._conns) >= self.MAX_CONN:
+                slow = [(v[0], r) for r, v in self._conns.items() if v[1] is True]
+                if not slow:
+                    return False                                          # all busy answering: this one is closed
+                self._cut(min(slow, key=lambda x: x[0])[1])
+            self._conns[request] = [now, True, now + self.READ_DEADLINE, now + self.DEADLINE]
+        return True
+
+    def _cut(self, request):
+        self._conns[request][1] = "cut"
+        try:
+            request.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+
+    def read_done(self, request):
+        with self._conn_lock:
+            if request in self._conns and self._conns[request][1] is True:
+                self._conns[request][1] = False
+
+    def process_request(self, request, client_address):
+        try:
+            super().process_request(request, client_address)
+        except Exception:                                                 # no thread could start: closed, so not counted
+            self._done(request)
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._done(request)
+
+    def _done(self, request):
+        with self._conn_lock:
+            self._conns.pop(request, None)
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError, OSError)):
+            return                                                        # a client that left, or a connection cut for taking too long
+        super().handle_error(request, client_address)
+
+    @staticmethod
+    def _reaper():
+        while True:
+            time.sleep(1)
+            now = time.monotonic()
+            with Server._conn_lock:
+                old = [r for r, v in Server._conns.items() if now > v[3] or (v[1] is True and now > v[2])]
+            for r in old:
+                try:
+                    r.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
 
 
 def load_nav(path=None):

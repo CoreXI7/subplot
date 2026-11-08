@@ -143,6 +143,9 @@ class SignIn:
             tls = self.https()
             ok = d and tls   # (sessions exist only over HTTPS: see https())
             self._token = next((t for t in self.cookie_values("subplot") if SESSIONS.check(t, d["epoch"], self.client_ip(), tls)), "") if ok else ""
+            if self._token and self.session_spent(hashlib.sha256(self._token.encode()).hexdigest()):
+                SESSIONS.end(self._token)   # its 10 wrong tries are used up, whichever reply used the last one
+                self._token = ""
         return self._token or None
 
     def device(self, acct):
@@ -229,6 +232,12 @@ class SignIn:
                 ACCOUNT.update(lambda x: x.update(failures=x.get("failures", 0) + 1, last_fail=int(now)))
             return 0
 
+    def session_spent(self, session):
+        """The wrong try just counted was this signed-in browser's last one: it is signed out now, not on its next try
+        (until then a stolen session would still read and change everything else)."""
+        with _try_lock:
+            return _session_tries.get(session, (0, 0))[0] >= SESSION_FAILS
+
     def try_ok(self, ip, dev=None, session=None):
         """A right answer: this address's count starts again, and the browser's own: the session's, a trusted
         device's, or (from any other browser) the account's. A trusted device never clears the account's count, so
@@ -240,14 +249,15 @@ class SignIn:
         ACCOUNT.update(lambda x: x["devices"][dev].update(fails=0) if dev and dev in x.get("devices", {})
                        else x.update(failures=0, last_fail=0))   # (a device forgotten mid-try was counted on the account)
 
-    def refuse_wait(self, wait, new_browser=False):
+    def refuse_wait(self, wait, new_browser=False, counted=False):
         """new_browser: a sign-in from a browser that never signed in here (someone else's guessing can keep it waiting:
         the account-wide waits are what stop guessing from many addresses at once), so it's told the way around."""
         if wait == -2:
             SESSIONS.end(self._token or "")
             ip = self.client_ip()
             try:
-                ACCOUNT.update(lambda x: ACCOUNT.fail(x, f"signed out after {SESSION_FAILS} wrong tries in Account", ip, "settings"))
+                if not counted:   # (the wrong try that used up the last one was already noted)
+                    ACCOUNT.update(lambda x: ACCOUNT.fail(x, f"signed out after {SESSION_FAILS} wrong tries in Account", ip, "settings"))
             except auth.Broken:
                 pass
             C.log(f"sign-in: a browser at {ip} signed out after {SESSION_FAILS} wrong tries in Account")
@@ -563,6 +573,8 @@ class SignIn:
                         _pending_totp[tok_key] = pend   # another try with the same QR code
             if step is None:
                 self.note_failure(ip, "wrong code while setting up the authenticator")
+                if self.session_spent(tok_key):
+                    return self.refuse_wait(-2, counted=True)
                 return self.send(400, {"why": "That code doesn't match. Check the app's clock, and type the newest code.", "field": "code"})
             self.try_ok(ip, session=tok_key)
             codes, hashes = auth.new_recovery_codes()
@@ -602,6 +614,8 @@ class SignIn:
             return self.send(409, {"why": "There's no account any more: reload the page.", "restart": True})
         if not auth.verify_password(s("password"), acct["hash"])[0]:
             self.note_failure(ip, "wrong password (account change)", "settings")
+            if self.session_spent(tok_key):
+                return self.refuse_wait(-2, counted=True)
             return self.send(403, {"why": "That's not the current password.", "field": "password"})
         needs_code = acct["totp"].get("on") and path != "/api/account/totp/start"   # (as the account is now)
         if needs_code:
@@ -612,6 +626,8 @@ class SignIn:
                 return self.send(403, {"why": CODE_USED, "field": "code"})
             if result != "ok":
                 self.note_failure(ip, "wrong code (account change)", "settings")
+                if self.session_spent(tok_key):
+                    return self.refuse_wait(-2, counted=True)
                 return self.send(403, {"why": "Wrong code. Use the newest 6-digit code from your app, or a recovery code.", "field": "code"})
         self.try_ok(ip, session=tok_key)
 
