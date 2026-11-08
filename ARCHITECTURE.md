@@ -50,7 +50,10 @@ All code is Python 3.12 standard library, plus `ffmpeg` and `ffprobe` as fixed e
 
 ## rules.json
 
-The owner edits this file. It is validated on load; the last valid copy stays in effect. The right-hand column shows the values in `config/rules.example.json`.
+The owner edits this file on the server. Only `path_map` and `media_roots` are required; every other key falls back to
+`common.DEFAULTS` (the right-hand column). It is validated on load; the last valid copy stays in effect. For the keys the
+page can edit (next section) this file's value is the starting point, and for the quality and timing limits it is the
+floor the page can't go below.
 
 | Key | Meaning | Default |
 | --- | --- | --- |
@@ -85,6 +88,18 @@ The owner edits this file. It is validated on load; the last valid copy stays in
 | `priority.libraries` | Library order for picking work. | `["TV Shows", "Anime", "Movies"]` |
 
 Validation checks: `path_map` keys absolute, values existing directories under a media root; `machine_id` 32 to 40 hex digits; language tags `[a-z]{2,3}(-[A-Za-z0-9]{2,4})?`; usernames 1 to 60 characters of `[A-Za-z0-9_.@-]`; thresholds in 0 to 1 with review not above keep; budgets integers 1 to 1000; hour windows as a day range and `HH:MM-HH:MM`; process names 1 to 60 characters of `[A-Za-z0-9_.-]`; ratios 0 to 1. A bad file is logged with a reason code and `rules.last-good.json` is used instead. A service with no valid rules at all exits 0 and does nothing.
+
+## Settings from the page
+
+The board writes `settings/settings.json` (`{"version", "at", "by", "values"}`, values nested like rules.json; only the
+keys in `common.PAGE_KEYS`) atomically under a lock, with a version check (409 when someone saved in between) and one
+history line per save (key names, never values). Every service reads it through `load_rules()`: file rules, then
+`DEFAULTS` for missing keys, then the page values merged on top. Reading fails safe: an unknown key or a malformed file
+ignores the page values (except exclusions, which only take things away); a value out of range, or a stricter-only value
+looser than the file (`thresholds.keep`/`review`, `find.min_score` may only rise; `find.sync_max_offset_ms`,
+`find.auto_shift_max_ms` may only fall), is dropped and the file's value stays. Exclusions are a union: the page can add
+libraries, never remove the file's or the code's. The page never sees or edits `path_map`, `media_roots`, the Ollama
+address, secrets or install-time settings. API: `GET /api/settings`, `POST /api/settings {"version","values"}`.
 
 ## common.py
 
@@ -338,9 +353,10 @@ never touches media, never starts a job and never changes rules.
 | `/api/request {"kind","key"\|"show","note"?}` | `requests/<id>.json`; 409 when a request is already pending for the same key/show or when 50 are pending; 404 for an unknown key/show |
 | `/api/decision {"key","decision","note"?}` | `decisions/<key>.json`; `exclude` for any library item, `keep`/`shift`/`regenerate`/`delete` only for a key with a review file |
 | `/api/pc {"generate_now","hours"?}` | writes or removes `decisions/pc-generate-now.json` |
+| `/api/settings {"version","values"}` | `settings/settings.json` (see "Settings from the page"); 400 names the field, 409 on a stale version |
 
-The read API is GET only. There is no settings endpoint: `rules.json` is the configuration, and the values the page
-needs arrive in state. `GET /api/state` returns `at`, `coverage` per library (`items`, `en`, `es`, `none`,
+The read API is GET only. `GET /api/settings` returns the page values, the server file's values and the merged ones for
+the page-editable keys only. `GET /api/state` returns `at`, `coverage` per library (`items`, `en`, `es`, `none`,
 `image_only`, `generatable`, `burned_in`, `ours`, `review`), `stale`, `scan_at`, `idle_hours`, `tonight` (`found`,
 `generated`, `placed`, `burned_in`, `rejected`, `failed`, `since`, counted from done.log since the current `night_id`),
 `recent` (the last 50 done entries, without paths), `review` cards, `queue` count, `budget` (`downloads`, `limit`,
@@ -401,7 +417,7 @@ the page works under any path prefix. All DOM is built through `el()`, text node
 Look: `base.css` holds the colour and type tokens and base elements; `subs.css` styles the blocks. One screen tells the whole
 story on a phone without scrolling; coverage bars animate once on load; figures are tabular; every list row is a 56 px
 tap target with one primary action; empty states say what happens next; errors are sentences, never codes; no modal
-dialogs except the Regenerate note; no raw provider fields and no settings screens (`rules.json` is the settings); dark
+dialogs except the Regenerate note; no raw provider fields; the Settings block is folded at the bottom; dark
 only; `prefers-reduced-motion` turns animations off; focus rings on everything interactive; no spinner longer than a
 second without a word beside it.
 

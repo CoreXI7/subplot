@@ -1,5 +1,5 @@
 {
-  "_about": "Subplot rules (copy to CONFIG_DIR/rules.json and edit). The services validate it and keep the last good copy. Libraries listed in exclude_libraries are skipped everywhere; Hentai is excluded in code as well and cannot be re-enabled here.",
+  "_about": "Subplot's server-side rules (copy to CONFIG_DIR/rules.json). Only where Plex's paths are on this machine. Everything else (languages, budget, timing, the PC's free hours, programs, libraries) is on the page under Settings. Optional here: unload_idle_model (README) and stricter floors for the quality settings.",
   "path_map": {
     "/data/tv": "/mnt/media1/tv",
     "/data/movies": "/mnt/media1/movies",
@@ -8,73 +8,5 @@
   "media_roots": [
     "/mnt/media1",
     "/mnt/media2"
-  ],
-  "exclude_libraries": [
-    "Hentai"
-  ],
-  "plex": {
-    "machine_id": "0123456789abcdef0123456789abcdef01234567"
-  },
-  "languages": {
-    "primary": "en",
-    "secondary": "es-419",
-    "secondary_for_users": []
-  },
-  "thresholds": {
-    "keep": 0.85,
-    "review": 0.6
-  },
-  "find": {
-    "daily_budget": 1000,
-    "min_score": 25,
-    "sync_max_offset_ms": 1500,
-    "retry_days": 30,
-    "auto_shift_max_ms": 60000
-  },
-  "generate": {
-    "model": "large-v3",
-    "max_hours_per_night": 6,
-    "burned_in_frames": 12,
-    "burned_in_ratio": 0.5,
-    "es_review_until_kept": 20
-  },
-  "pc_idle": {
-    "hours": [
-      "mon-fri 00:00-17:00",
-      "mon-fri 23:30-23:59",
-      "sat-sun 02:00-09:00"
-    ],
-    "no_processes": [
-      "VRChat.exe"
-    ],
-    "gpu_util_below": 20,
-    "vram_free_mb": 6000,
-    "yield_to": [
-      "ollama.exe"
-    ],
-    "unload_idle_model": {
-      "ollama": "http://10.0.0.50:11434",
-      "after_min": 10
-    },
-    "not_games": [
-      "wallpaper32.exe",
-      "wallpaper64.exe",
-      "winrtutil32.exe",
-      "winrtutil64.exe",
-      "applicationwallpaperinject32.exe",
-      "applicationwallpaperinject64.exe",
-      "wallpaperservice32_c.exe",
-      "webwallpaper32.exe",
-      "webwallpaper64.exe",
-      "ui32.exe"
-    ]
-  },
-  "priority": {
-    "watched_days": 30,
-    "libraries": [
-      "TV Shows",
-      "Anime",
-      "Movies"
-    ]
-  }
+  ]
 }

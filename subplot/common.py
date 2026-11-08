@@ -49,6 +49,9 @@ PC_DIR = os.path.join(STATE, "pc")
 DONE_LOG = os.path.join(STATE, "done.log")
 ACTION_LOG = os.path.join(STATE, "actions.log")
 CURRENT = os.path.join(STATE, "current.json")
+SETTINGS_DIR = os.path.join(STATE, "settings")           # the page's settings (SPEC-SETTINGS.md); only the board writes here
+SETTINGS = os.path.join(SETTINGS_DIR, "settings.json")
+SETTINGS_HISTORY = os.path.join(SETTINGS_DIR, "history.log")
 PC_OVERRIDE = os.path.join(DECISIONS, "pc-generate-now.json")   # the page's "Generate now" switch: {"until", "at", "by"}; not an item key        # what a step is working on right now (find.py, gen.py); absent = nothing
 
 EXCLUDE_LIBRARIES = ("Hentai",)                     # hard-coded on purpose: rules.json can add names, never remove this one
@@ -257,13 +260,16 @@ def read_json(path, cap):
         return None
 
 
-def write_json(path, obj, mode=0o600):
+def write_json(path, obj, mode=0o600, sync=False):
     ensure_dir(os.path.dirname(path))
     tmp = f"{path}.{os.getpid()}.{secrets.token_hex(4)}.tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW, mode)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(obj, f, separators=(",", ":"), ensure_ascii=False)
+            if sync:
+                f.flush()
+                os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -621,19 +627,32 @@ def _ass_ms(t):
 
 # ---------------------------------------------------------------- rules
 
-def load_rules(path=RULES):
-    """Validated rules, or the last good copy, or None. A bad file is logged with a reason code."""
+def file_rules(path=RULES):
+    """rules.json validated, with DEFAULTS filled in for every key it leaves out; else the last good copy; else None.
+    A bad file is logged with a reason code. This is the server file's word: the floors for the page's settings."""
     raw = read_json(path, 256 * 1024)
-    why = _rules_problem(raw)
+    filled = fill_defaults(raw)
+    why = _rules_problem(filled)
     if why is None:
         try:
             write_json(RULES_LAST_GOOD, raw)
         except OSError:
             pass
-        return _normalize_rules(raw)
+        return filled
     log(f"rules: {why}; using the last good copy")
-    old = read_json(RULES_LAST_GOOD, 256 * 1024)
-    return _normalize_rules(old) if _rules_problem(old) is None else None
+    old = fill_defaults(read_json(RULES_LAST_GOOD, 256 * 1024))
+    return old if _rules_problem(old) is None else None
+
+
+def load_rules(path=RULES, settings=SETTINGS):
+    """The rules every step runs on: file_rules() with the page's settings merged in (settings=None skips them), the
+    hard-coded exclusions added. None when there are no valid rules at all."""
+    r = file_rules(path)
+    if r is None:
+        return None
+    if settings:
+        r = apply_settings(r, settings)[0]
+    return _normalize_rules(r)
 
 
 def _rules_problem(r):
@@ -662,8 +681,9 @@ def _rules_problem(r):
     if not isinstance(ex, list) or not all(isinstance(x, str) and 0 < len(x) < 80 for x in ex):
         return "exclude_libraries must be a list of names"
     plex = r.get("plex", {})
-    if not isinstance(plex, dict) or not isinstance(plex.get("machine_id"), str) or not MACHINE_ID.fullmatch(plex["machine_id"]):
-        return "plex.machine_id must be 32-40 hex characters"
+    if not isinstance(plex, dict) or not isinstance(plex.get("machine_id"), str) \
+            or not (plex["machine_id"] == "" or MACHINE_ID.fullmatch(plex["machine_id"])):
+        return "plex.machine_id must be empty or 32-40 hex characters"
     lang = r.get("languages", {})
     if not isinstance(lang, dict) or not LANG.fullmatch(str(lang.get("primary", ""))) or not LANG.fullmatch(str(lang.get("secondary", ""))):
         return "languages.primary/secondary must be language codes"
@@ -734,6 +754,274 @@ def _normalize_rules(r):
     r.setdefault("priority", {}).setdefault("watched_days", 30)
     r["priority"].setdefault("libraries", [])
     return r
+
+
+# ---------------------------------------------------------------- defaults and the page's settings (SPEC-SETTINGS.md)
+
+DEFAULTS = {
+    "exclude_libraries": [],
+    "plex": {"machine_id": ""},
+    "languages": {"primary": "en", "secondary": "es-419", "secondary_for_users": []},
+    "thresholds": {"keep": 0.85, "review": 0.6},
+    "find": {"daily_budget": 1000, "min_score": 25, "sync_max_offset_ms": 1500, "retry_days": 30, "auto_shift_max_ms": 60000},
+    "generate": {"model": "large-v3", "max_hours_per_night": 6, "burned_in_frames": 12, "burned_in_ratio": 0.5,
+                 "es_review_until_kept": 20},
+    "pc_idle": {"hours": ["mon-fri 00:00-17:00", "sat-sun 02:00-09:00"], "no_processes": [], "gpu_util_below": 20,
+                "vram_free_mb": 6000, "yield_to": [],
+                "not_games": ["wallpaper32.exe", "wallpaper64.exe", "winrtutil32.exe", "winrtutil64.exe",
+                              "applicationwallpaperinject32.exe", "applicationwallpaperinject64.exe",
+                              "wallpaperservice32_c.exe", "webwallpaper32.exe", "webwallpaper64.exe", "ui32.exe"]},
+    "priority": {"watched_days": 30, "libraries": []},
+}
+
+
+def fill_defaults(raw):
+    """A copy of rules.json with every key it leaves out taken from DEFAULTS (one level into each section). A section
+    that is present but not an object is left alone so the validator refuses it. Not a dict -> returned as is."""
+    if not isinstance(raw, dict):
+        return raw
+    out = json.loads(json.dumps(raw))
+    for k, v in DEFAULTS.items():
+        if k not in out:
+            out[k] = json.loads(json.dumps(v))
+        elif isinstance(v, dict) and isinstance(out[k], dict):
+            for kk, vv in v.items():
+                out[k].setdefault(kk, json.loads(json.dumps(vv)))
+    return out
+
+
+def _is_int(v, lo, hi):
+    return isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+
+
+def _is_num(v, lo, hi):
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and lo <= v <= hi
+
+
+def _is_list(v, n, ok):
+    return isinstance(v, list) and len(v) <= n and all(ok(x) for x in v)
+
+
+def _is_name(x):
+    return isinstance(x, str) and 0 < len(x) <= 80 and x.strip() != "" and not CONTROL.search(x)
+
+
+def _is_re(rx):
+    return lambda x: isinstance(x, str) and rx.fullmatch(x) is not None
+
+
+# dotted key -> (label for the page's sentences, check, stricter-only: "min" = page >= file, "max" = page <= file, or None)
+PAGE_KEYS = {
+    "plex.machine_id": ("Plex server id", lambda v: isinstance(v, str) and (v == "" or MACHINE_ID.fullmatch(v) is not None), None),
+    "languages.primary": ("Main language", _is_re(LANG), None),
+    "languages.secondary": ("Second language", _is_re(LANG), None),
+    "languages.secondary_for_users": ("Second-language viewers", lambda v: _is_list(v, 50, _is_re(USERNAME)), None),
+    "thresholds.keep": ("Keep at", lambda v: _is_num(v, 0, 1), "min"),
+    "thresholds.review": ("Ask me at", lambda v: _is_num(v, 0, 1), "min"),
+    "find.daily_budget": ("Downloads a day", lambda v: _is_int(v, 1, 1000), None),
+    "find.retry_days": ("Search again after", lambda v: _is_int(v, 1, 1000), None),
+    "find.min_score": ("Lowest match score", lambda v: _is_int(v, 1, 1000), "min"),
+    "find.sync_max_offset_ms": ("Largest timing error", lambda v: _is_int(v, 1, 100000), "max"),
+    "find.auto_shift_max_ms": ("Largest automatic shift", lambda v: _is_int(v, 0, 600000), "max"),
+    "generate.model": ("Whisper model", _is_re(re.compile(r"[A-Za-z0-9._-]{1,40}")), None),
+    "generate.max_hours_per_night": ("Hours a night", lambda v: _is_int(v, 1, 24), None),
+    "generate.burned_in_frames": ("Frames checked for burned-in text", lambda v: _is_int(v, 4, 48), None),
+    "generate.burned_in_ratio": ("Burned-in if this share has text", lambda v: _is_num(v, 0, 1), None),
+    "generate.es_review_until_kept": ("Ask me about Spanish until kept", lambda v: _is_int(v, 0, 1000), None),
+    "pc_idle.hours": ("Free hours", lambda v: _is_list(v, 20, _is_re(HOURS)), None),
+    "pc_idle.no_processes": ("Programs that block", lambda v: _is_list(v, 100, _is_re(PROCNAME)), None),
+    "pc_idle.yield_to": ("Programs it makes room for", lambda v: _is_list(v, 100, _is_re(PROCNAME)), None),
+    "pc_idle.not_games": ("Programs that are not games", lambda v: _is_list(v, 100, _is_re(PROCNAME)), None),
+    "pc_idle.gpu_util_below": ("GPU busy above", lambda v: _is_int(v, 0, 100), None),
+    "pc_idle.vram_free_mb": ("Free video memory needed", lambda v: _is_int(v, 0, 100000), None),
+    "pc_idle.unload_after_min": ("Unload an idle model after", lambda v: v is None or _is_int(v, 0, 720), None),
+    "priority.watched_days": ("Recently watched means", lambda v: _is_int(v, 1, 365), None),
+    "priority.libraries": ("Library order", lambda v: _is_list(v, 50, _is_name), None),
+    "exclude_libraries": ("Excluded libraries", lambda v: _is_list(v, 50, _is_name), None),
+}
+_SECTIONS = {k.split(".")[0] for k in PAGE_KEYS if "." in k}
+_SETTINGS_ENVELOPE = {"version", "at", "by", "values"}
+BY = re.compile(r"[^A-Za-z0-9._@-]")
+
+
+def settings_by(who):
+    """Who saved, for the envelope and the history: anything outside [A-Za-z0-9._@-] becomes _, cut to 60."""
+    return BY.sub("_", str(who or "page"))[:60] or "page"
+
+
+def _get(rules, dotted):
+    if dotted == "pc_idle.unload_after_min":
+        um = (rules.get("pc_idle") or {}).get("unload_idle_model")
+        return um.get("after_min", 10) if isinstance(um, dict) else None
+    cur = rules
+    for part in dotted.split("."):
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(part)
+    return cur
+
+
+def flatten_settings(values):
+    """{dotted key: value} for a nested values object, and the first key that is not in PAGE_KEYS (or None)."""
+    flat = {}
+    if not isinstance(values, dict):
+        return flat, "values"
+    for k, v in values.items():
+        if k in PAGE_KEYS:
+            flat[k] = v
+        elif k in _SECTIONS and isinstance(v, dict):
+            for kk, vv in v.items():
+                key = f"{k}.{kk}"
+                if key not in PAGE_KEYS:
+                    return flat, key
+                flat[key] = vv
+        else:
+            return flat, str(k)[:60]
+    return flat, None
+
+
+def _looser(key, page, file_value):
+    """True when a stricter-only page value would loosen the gate against the server file."""
+    mode = PAGE_KEYS[key][2]
+    if mode is None or file_value is None:
+        return False
+    floor = _as_number(file_value)
+    if floor is None:
+        return True                                   # can't compare: keep the server file's value
+    return page < floor if mode == "min" else page > floor
+
+
+def _as_number(v):
+    """A finite float from a rules.json number (the file validator has always accepted "0.85" too), else None."""
+    if isinstance(v, bool):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _apply(rules, flat):
+    out = json.loads(json.dumps(rules))
+    for key, v in flat.items():
+        if key == "exclude_libraries":
+            out["exclude_libraries"] = sorted(set(out.get("exclude_libraries", [])) | set(v))
+        elif key == "pc_idle.unload_after_min":
+            idle = out.setdefault("pc_idle", {})
+            if v is None:
+                idle.pop("unload_idle_model", None)
+            elif isinstance(idle.get("unload_idle_model"), dict):
+                idle["unload_idle_model"]["after_min"] = v
+        else:
+            sec, sub = key.split(".")
+            out.setdefault(sec, {})[sub] = v
+    return out
+
+
+def read_settings(path=SETTINGS):
+    """(envelope, reason): the settings file if its envelope is exactly right, else (None, reason code). Absent = (None, None)."""
+    try:
+        os.lstat(path)
+    except FileNotFoundError:
+        return None, None
+    except OSError:
+        return None, "unreadable"
+    env = read_json(path, 64 * 1024)
+    if not isinstance(env, dict) or set(env) != _SETTINGS_ENVELOPE:
+        return None, "bad envelope"
+    if not _is_int(env["version"], 1, 10 ** 9) or not isinstance(env["at"], str) or len(env["at"]) > 40 \
+            or not isinstance(env["by"], str) or env["by"] != settings_by(env["by"]) or not isinstance(env["values"], dict):
+        return None, "bad envelope"
+    return env, None
+
+
+def apply_settings(filled, path=SETTINGS):
+    """Merge the page's settings over file rules (already filled and valid). Returns (rules, info) with info
+    {"version", "at", "by", "values", "ignored": reason|None, "dropped": [dotted keys]}. Fails safe: a bad file or value
+    falls back to the server file's value, never to something looser; valid exclusions are applied even then."""
+    r, info = _apply_settings(filled, path)
+    r["exclude_libraries"] = sorted(set(r.get("exclude_libraries", [])) | set(EXCLUDE_LIBRARIES))   # never without these
+    return r, info
+
+
+def _salvage_exclusions(raw):
+    """{"exclude_libraries": [...]} from a settings file that is otherwise not usable, when that one value is valid."""
+    values = raw.get("values") if isinstance(raw, dict) else None
+    excl = values.get("exclude_libraries") if isinstance(values, dict) else None
+    return {"exclude_libraries": excl} if PAGE_KEYS["exclude_libraries"][1](excl) else {}
+
+
+def _apply_settings(filled, path):
+    info = {"version": 0, "at": None, "by": None, "values": {}, "ignored": None, "dropped": []}
+    env, why = read_settings(path)
+    if env is None:
+        if why:
+            info["ignored"] = why
+            log(f"settings: ignored ({why})")
+            return _apply(filled, _salvage_exclusions(read_json(path, 64 * 1024))), info
+        return json.loads(json.dumps(filled)), info
+    info.update(version=env["version"], at=env["at"], by=env["by"], values=env["values"])
+    flat, unknown = flatten_settings(env["values"])
+    excl_flat = _salvage_exclusions(env)
+    if unknown:
+        info["ignored"] = "unknown key"
+        log("settings: ignored (unknown key)")
+        return _apply(filled, excl_flat), info
+    keep = {}
+    for key, v in flat.items():
+        if not PAGE_KEYS[key][1](v) or _looser(key, v, _get(filled, key)):
+            info["dropped"].append(key)
+            continue
+        keep[key] = v
+    k = _as_number(keep.get("thresholds.keep", _get(filled, "thresholds.keep")))
+    if "thresholds.review" in keep and (k is None or keep["thresholds.review"] > k):
+        keep.pop("thresholds.review")
+        info["dropped"].append("thresholds.review")
+    if info["dropped"]:
+        log("settings: dropped " + ", ".join(sorted(info["dropped"])))
+    merged = _apply(filled, keep)
+    if _rules_problem(merged) is not None:
+        info["ignored"] = "merged rules invalid"
+        log("settings: ignored (merged rules invalid)")
+        return _apply(filled, excl_flat), info
+    return merged, info
+
+
+def check_settings(filled, values):
+    """The board's strict check before a save. (clean values, None, None) or (None, sentence, dotted key or "").
+    Clean values hold only what differs from the server file (exclusions: only names not already excluded there)."""
+    flat, unknown = flatten_settings(values)
+    if unknown:
+        return None, f"Unknown setting: {unknown}.", unknown if unknown != "values" else ""
+    for key, v in flat.items():
+        label, ok, mode = PAGE_KEYS[key]
+        if not ok(v):
+            return None, f"{label}: that value isn't allowed.", key
+        fv = _get(filled, key)
+        if _looser(key, v, fv):
+            side = "down to" if mode == "min" else "up to"
+            return None, f"{label} can only be made stricter here. The server file allows {side} {fv}; change it there.", key
+    k = _as_number(flat.get("thresholds.keep", _get(filled, "thresholds.keep")))
+    r = _as_number(flat.get("thresholds.review", _get(filled, "thresholds.review")))
+    if k is None or r is None or r > k:
+        return None, "Ask me at must not be higher than Keep at.", "thresholds.review" if "thresholds.review" in flat else "thresholds.keep"
+    if _rules_problem(_apply(filled, flat)) is not None:
+        return None, "These settings don't fit together with the server file.", ""
+    clean = {}
+    for key, v in flat.items():
+        if key == "exclude_libraries":
+            v = sorted(set(v) - set(filled.get("exclude_libraries", [])) - set(EXCLUDE_LIBRARIES))
+            if not v:
+                continue
+        elif v == _get(filled, key):
+            continue
+        if "." in key:
+            sec, sub = key.split(".")
+            clean.setdefault(sec, {})[sub] = v
+        else:
+            clean[key] = v
+    return clean, None, None
 
 
 def _lan_url_ok(url):

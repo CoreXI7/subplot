@@ -4,6 +4,8 @@ English subtitles for every episode and movie in your Plex library. Subplot find
 against the audio, generates the rest with Whisper on your gaming PC while you're not using it, and puts each one beside its
 video so Plex picks it up.
 
+![Subplot's page: overall progress, the episode being generated, coverage per library, and subtitles that need a look](docs/img/overview.png)
+
 ## Why
 
 Most subtitle tools only see what Sonarr and Radarr manage, and a downloaded subtitle that's 20 seconds off is worse than
@@ -22,7 +24,9 @@ ones from your phone.
    It only ever replaces or deletes files it wrote itself.
 
 A page shows progress, what's missing, and the files that need a look, with buttons to keep, regenerate, fix timing or
-delete.
+delete. It works on a phone too.
+
+<img src="docs/img/phone.png" alt="The same page on a phone" width="300">
 
 ## Requirements
 
@@ -40,8 +44,13 @@ delete.
 2. Create the account the services run as (not root) and a venv for the timing check:
    `python3 -m venv --copies /opt/subplot/venv && /opt/subplot/venv/bin/pip install -r requirements-sync.txt`
 3. Copy the examples into your config folder (default `/etc/subplot`) and edit them:
-   `subplot.conf.example` to `subplot.conf`, `rules.example.json` to `rules.json`, `env.example` to `.env`.
-   Make `.env` mode 600 and owned by the service account. Each setting is explained in the file.
+   - `subplot.conf.example` to `subplot.conf`: the account, folders, media drives, Plex database copy and GPU PC.
+   - `rules.example.json` to `rules.json`: where Plex's paths are on this machine.
+   - `env.example` to `.env`: your OpenSubtitles login and key and your Plex token. Make it mode 600, owned by the
+     service account.
+
+   Everything else (languages, daily downloads, timing, quality, the PC's free hours, programs, libraries) is on the page
+   under **Settings**.
 4. Set up the GPU PC: [pc/install-pc.md](pc/install-pc.md).
 5. Run `sudo ./install.sh /etc/subplot/subplot.conf`. It checks everything first and tells you what to fix.
    `./install.sh --check` renders the services without installing anything.
@@ -98,6 +107,21 @@ authenticator app, see and sign out browsers, and change the password.
 
 Under a path prefix, use `location /subs/` and `proxy_pass http://unix:/var/lib/subplot-sock/board.sock:/;` and open the page with the
 trailing slash. `PUBLIC_HOST` in `subplot.conf` must match the host name the proxy passes on.
+
+### Settings
+
+![The Settings section of the page](docs/img/settings.png)
+
+Each setting shows whether it comes from the server or was changed on the page, with a Reset back to the server's value.
+Changes take effect at the next run of each step. The quality and timing limits can only be made stricter on the page;
+to loosen them, put the lower value in `rules.json` on the server (for example `"thresholds": {"keep": 0.8}`). To let
+Subplot unload an idle Ollama model on the GPU PC before generating, add to `rules.json`:
+
+```json
+"pc_idle": {"unload_idle_model": {"ollama": "http://10.0.0.50:11434", "after_min": 10}}
+```
+
+Logins, keys and folders are never shown or changed on the page.
 
 ## Updating
 

@@ -47,7 +47,7 @@ REPEAT = {"MEDIA_ROOT": "MEDIA_ROOTS", "HIDE_PATH": "HIDE_PATHS"}          # a l
 PATH_KEYS = ("CODE_DIR", "STATE_DIR", "CONFIG_DIR", "VENV", "SOCKET", "OVERLAY_DIR", "PLEX_DB")
 STEPS = ("scan", "find", "sync", "place", "gen", "board")
 TIMERS = ("scan", "find", "sync", "place", "gen")
-STATE_SUBDIRS = ("incoming", "queue", "review", "decisions", "marks", "requests", "pc", "tokens")
+STATE_SUBDIRS = ("incoming", "queue", "review", "decisions", "marks", "requests", "pc", "tokens", "settings")
 
 
 class Refused(Exception):

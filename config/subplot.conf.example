@@ -19,14 +19,14 @@ PC_ROOT=C:/Subplot
 SOCKET=/var/lib/subplot-sock/board.sock
 PROXY_GROUP=www-data
 PUBLIC_HOST=subs.example.com
-# Optional:
-MARKER_TAG=subplot
-USER_AGENT=subplot v1.0
-UNIT_PREFIX=subplot
-OVERLAY_DIR=
-# Optional: extra mounts the services without media access must not see (space-separated).
-HIDE_PATHS=
+# Optional (the defaults work for most setups):
 # Who signs people in to the page. proxy (default): your reverse proxy (an SSO such as Authelia, or basic auth) must
 # authenticate every request. login: the page's own sign-in (one account, optional authenticator app); your proxy then
 # only needs HTTPS and must set X-Forwarded-Proto and X-Real-IP. install.sh prints how to get the setup code.
 AUTH=proxy
+MARKER_TAG=subplot
+USER_AGENT=subplot v1.0
+UNIT_PREFIX=subplot
+OVERLAY_DIR=
+# Extra mounts the services without media access must not see (space-separated).
+HIDE_PATHS=

@@ -20,7 +20,8 @@ STATIC = os.path.join(C.HERE, "static")
 FILES = {"/": ("index.html", "text/html; charset=utf-8"), "/subs.js": ("subs.js", "text/javascript; charset=utf-8"),
          "/subs-views.js": ("subs-views.js", "text/javascript; charset=utf-8"), "/subs.css": ("subs.css", "text/css; charset=utf-8"),
          "/base.css": ("base.css", "text/css; charset=utf-8"), "/favicon.svg": ("favicon.svg", "image/svg+xml"),
-         "/account.js": ("account.js", "text/javascript; charset=utf-8")}
+         "/account.js": ("account.js", "text/javascript; charset=utf-8"),
+         "/settings.js": ("settings.js", "text/javascript; charset=utf-8")}
 if AUTH == "login":
     FILES.update({"/login": ("login.html", "text/html; charset=utf-8"), "/login.js": ("login.js", "text/javascript; charset=utf-8")})
 NAV_LABEL = re.compile(r"[A-Za-z0-9 .&'_-]{1,24}")
@@ -29,6 +30,7 @@ NAV_HTTPS = re.compile(r"https://[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?
 _nav = []                                                              # validated at start (load_nav)
 _overlay_fd = None                                                     # the overlay folder, opened once at start
 LIMIT, RECENT, MAX_RESULTS, CACHE_S = 8192, 50, 50, 5
+SETTINGS_LIMIT = 64 * 1024                                             # the settings body: up to 3 lists of 100 program names
 HEADERS = {
     "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
     "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store",
@@ -75,6 +77,15 @@ def all_marks():
 PUBLIC_ITEM_FIELDS = C.BOARD_FIELDS
 
 
+def _stamp(path):
+    """(mtime_ns, size) of a file, or None when it is absent (the settings file usually is)."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
 @_locked
 def _library():
     """The board's library copy (board-index.json, never the full library.json: that one would not fit the board's memory
@@ -82,7 +93,7 @@ def _library():
     if time.monotonic() - _cache["at"] < CACHE_S and _cache["library"] is not None:
         return _cache["library"], _cache["rules"]
     try:
-        key = (os.lstat(C.BOARD_INDEX).st_mtime_ns, os.lstat(C.RULES).st_mtime_ns)
+        key = (os.lstat(C.BOARD_INDEX).st_mtime_ns, _stamp(C.RULES), _stamp(C.SETTINGS))
     except OSError:
         key = ("missing", time.time())                                   # never cache a failed stat: retry next time
     if key != _cache["key"] or _cache["library"] is None:
@@ -451,6 +462,81 @@ def handle_decision(body):
 PC_HOURS_MAX = 12
 
 
+def _settings_view(filled, merged, info):
+    """GET /api/settings: page values, the server file's values and the merged ones for the page-editable keys only.
+    Never path_map, media_roots or the Ollama address."""
+    keys = list(C.PAGE_KEYS)
+    history = []
+    for line in _history_lines()[-10:]:
+        try:
+            h = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(h, dict) and isinstance(h.get("changed"), list):
+            history.append({"at": str(h.get("at", ""))[:40], "by": C.settings_by(h.get("by")), "version": h.get("version") if isinstance(h.get("version"), int) else 0,
+                            "changed": [k for k in h["changed"] if k in C.PAGE_KEYS][:30]})
+    return {"version": info["version"], "at": info["at"], "by": info["by"], "values": info["values"] if not info["ignored"] else {},
+            "file": {k: C._get(filled or {}, k) for k in keys}, "effective": {k: C._get(merged, k) for k in keys},
+            "ollama_set": isinstance(((filled or {}).get("pc_idle") or {}).get("unload_idle_model"), dict),
+            "locked_libraries": sorted(set((filled or {}).get("exclude_libraries", [])) | set(C.EXCLUDE_LIBRARIES)),
+            "history": history, "ignored": info["ignored"], "dropped": sorted(info["dropped"])}
+
+
+def settings_payload():
+    filled = C.file_rules()
+    if filled is None:
+        return 503, {"why": "The server's rules.json is not valid, so settings can't be shown. Fix it on the server."}
+    return 200, _settings_view(filled, *C.apply_settings(filled, C.SETTINGS))
+
+
+def handle_settings(body, by="page"):
+    """POST /api/settings {"version": n, "values": {...}}: a strict check against the server file, then an atomic save
+    under a lock with version+1 and a history line (key names only). 409 when someone saved in between."""
+    if not isinstance(body, dict) or set(body) != {"version", "values"} or not isinstance(body["version"], int) \
+            or isinstance(body["version"], bool) or not isinstance(body["values"], dict):
+        return 400, {"why": "Send the version you loaded and the values.", "field": ""}
+    C.ensure_dir(C.SETTINGS_DIR)
+    lock = os.open(C.SETTINGS + ".lock", os.O_RDWR | os.O_CREAT | C.NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        filled = C.file_rules()                                        # from disk, not the cache: the floors may have moved
+        if filled is None:
+            return 503, {"why": "The server's rules.json is not valid, so settings can't be saved. Fix it on the server.", "field": ""}
+        env, _why = C.read_settings(C.SETTINGS)
+        current = env["version"] if env else 0
+        if body["version"] != current:
+            return 409, {"why": "Settings changed in another window. Reload to see them.", "field": ""}
+        clean, why, field = C.check_settings(filled, body["values"])
+        if clean is None:
+            return 400, {"why": why, "field": field}
+        old_flat = C.flatten_settings(env["values"])[0] if env else {}
+        new_flat = C.flatten_settings(clean)[0]
+        changed = sorted(k for k in set(old_flat) | set(new_flat) if old_flat.get(k, object()) != new_flat.get(k, object()))
+        who = C.settings_by(by)
+        version = current + 1
+        C.write_json(C.SETTINGS, {"version": version, "at": C.now(), "by": who, "values": clean}, sync=True)
+        _append_history({"at": C.now(), "by": who, "version": version, "changed": changed})
+    finally:
+        os.close(lock)
+    with _cache_lock:
+        _cache.update({"key": None, "at": 0.0})
+    C.log(f"action: settings saved (version {version}; {len(changed)} changed)")
+    return 200, _settings_view(filled, *C.apply_settings(filled, C.SETTINGS))
+
+
+def _history_lines():
+    """The history file's lines (it holds at most 200 short ones; a file over 256 KiB is not ours and reads as empty)."""
+    raw = C.read_bytes(C.SETTINGS_HISTORY, 256 * 1024)
+    return [ln for ln in (raw or b"").decode("utf-8", "replace").splitlines() if ln.startswith("{")]
+
+
+def _append_history(entry):
+    """One JSON line per save, keeping the last 200 (rewritten atomically; it is small)."""
+    lines = _history_lines()[-199:]
+    lines.append(json.dumps(entry, separators=(",", ":")))
+    C.write_bytes(C.SETTINGS_HISTORY, ("\n".join(lines) + "\n").encode("utf-8"))
+
+
 def handle_pc(body):
     """The owner's "Generate now" switch: {"generate_now": bool, "hours": 1..12 (default 6)} -> decisions/pc-generate-now.json
     with `until` = now + hours (on) or removed (off). Only the idle hours are waived by it (common.pc_idle)."""
@@ -560,6 +646,8 @@ class Handler(signin.SignIn, http.server.BaseHTTPRequestHandler):
             return self.reply(400, {"why": "bad query"})
         if path == "/api/state":
             return self.reply(200, state_payload())
+        if path == "/api/settings":
+            return self.reply(*settings_payload())
         if path == "/api/missing":
             return self.reply(200, missing_payload((query.get("q") or [""])[0]))
         if path.startswith("/api/show/"):
@@ -574,7 +662,7 @@ class Handler(signin.SignIn, http.server.BaseHTTPRequestHandler):
         if path is None:
             return
         signing = AUTH == "login" and (path in signin.PUBLIC_POST or path in signin.ACCOUNT_POST)
-        if path not in ("/api/request", "/api/decision", "/api/pc") and not signing:
+        if path not in ("/api/request", "/api/decision", "/api/pc", "/api/settings") and not signing:
             return self.reply(404, {"why": "not found"})
         if self.headers.get("X-Subs") != "1":
             return self.reply(403, {"why": "missing X-Subs header"})
@@ -589,7 +677,7 @@ class Handler(signin.SignIn, http.server.BaseHTTPRequestHandler):
             n = int(self.headers.get("Content-Length", ""))
         except (TypeError, ValueError):
             return self.reply(411, {"why": "length required"})
-        if n < 0 or n > LIMIT:
+        if n < 0 or n > (SETTINGS_LIMIT if path == "/api/settings" else LIMIT):
             return self.reply(413, {"why": "body too large"})
         raw = self.rfile.read(n)
         self.read_done()
@@ -599,8 +687,17 @@ class Handler(signin.SignIn, http.server.BaseHTTPRequestHandler):
             return self.reply(400, {"why": "bad JSON"})
         if signing:
             return self.auth_post(path, body)
+        if path == "/api/settings":
+            return self.reply(*handle_settings(body, self.settings_by()))
         code, payload = {"/api/request": handle_request, "/api/decision": handle_decision, "/api/pc": handle_pc}[path](body)
         self.reply(code, payload)
+
+    def settings_by(self):
+        """Who is saving, for the history: the proxy's Remote-User when it is one plain name, else "page"."""
+        if AUTH == "login":
+            return "owner"
+        users = self.headers.get_all("Remote-User") or []
+        return users[0] if len(users) == 1 and C.USERNAME.fullmatch(users[0]) else "page"
 
     def do_HEAD(self):
         self.close_connection = True

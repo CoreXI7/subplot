@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- New: a **Settings** section on the page for everything that used to need `rules.json` (languages, daily downloads,
+  timing, quality, the PC's free hours, programs, library order, exclusions), with a server-or-page label and Reset on
+  each. `rules.json` now needs only `path_map` and `media_roots`; an existing full file keeps working. The quality and
+  timing limits can only be made stricter on the page. Re-run `install.sh` after updating (it creates the settings folder).
+- README: screenshots (made from demo data by `tools/screenshots.py`).
 - Fixed: Plex's region tags (`en-us`, `en-gb`) on embedded subtitles now count as English, so those items are no
   longer looked up or generated.
 - Fixed: on dual-audio files Whisper now hears the English track (the first one was used, often Japanese or Spanish).

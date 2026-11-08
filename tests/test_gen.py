@@ -237,7 +237,10 @@ class GenTests(unittest.TestCase):
         roots = [tempfile.mkdtemp(dir=os.environ.get("SUBS_SANDBOX") or None) for _ in real["media_roots"]]
         real["path_map"] = {k: v.replace(old, new, 1) for k, v in real["path_map"].items() for old, new in zip(real["media_roots"], roots) if v.startswith(old)}
         real["media_roots"] = roots
+        real = C.fill_defaults(real)                                   # the example holds only paths; the rest is defaults
         self.assertIsNone(C._rules_problem(json.loads(json.dumps(real))), "the example rules must validate")
+        real["pc_idle"]["unload_idle_model"] = {"ollama": "http://10.0.0.50:11434", "after_min": 10}
+        self.assertIsNone(C._rules_problem(json.loads(json.dumps(real))), "the README's unload block must validate")
         if True:
             for bad in ("https://10.0.0.50:11434", "http://1.2.3.4:11434", "http://10.0.0.50:11434/x", 5):
                 r = json.loads(json.dumps(real)); r["pc_idle"]["unload_idle_model"] = {"ollama": bad}
