@@ -23,6 +23,7 @@ Environment=SUBS_OVERLAY=@OVERLAY_DIR@
 TimeoutStartSec=30min
 BindPaths=@STATE_DIR@
 BindReadOnlyPaths="@PLEX_DB_DIR@"
+InaccessiblePaths=-@STATE_DIR@/auth
 InaccessiblePaths=-@CONFIG_DIR@/.env
 InaccessiblePaths=-@STATE_DIR@/tokens
 InaccessiblePaths=-@MEDIA_ROOT@

@@ -51,6 +51,7 @@ async function api(path, body) {
     const r = await fetch(API + path, opts);
     let data = null;
     try { data = await r.json(); } catch (e) { data = null; }
+    if (r.status === 401 && data && data.signin === true) location.href = "login";   // AUTH=login: the session ended
     return { status: r.status, data };
   } finally {
     clearTimeout(timer);

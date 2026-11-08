@@ -29,7 +29,8 @@ delete.
 - Linux with systemd 255+ (and systemd-resolved for DNS), Python 3.12 and ffmpeg, on the machine that has your media
   drives mounted.
 - Plex Media Server on that machine (tested with 1.43), and a regular copy of its library database (below).
-- A reverse proxy that serves HTTPS and signs you in. Subplot has no login of its own.
+- A reverse proxy that serves HTTPS, and either signs you in (an SSO such as Authelia, or basic auth) or leaves that to
+  Subplot's own sign-in (`AUTH=login`, below).
 - An OpenSubtitles.com account and API key. VIP gives 1,000 downloads a day; free gives 20.
 - For generating: a Windows PC with an NVIDIA GPU (8 GB of VRAM or more) reachable over SSH. See [pc/install-pc.md](pc/install-pc.md).
 
@@ -73,6 +74,27 @@ location / {
     proxy_read_timeout 15s;
 }
 ```
+
+### Subplot's own sign-in
+
+If your proxy has no sign-in of its own, set `AUTH=login` in `subplot.conf` and run `install.sh` again. Drop the sign-in
+line and the `Cookie` line (the page's own session is a cookie) from the block above, and add:
+
+```nginx
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Real-IP $remote_addr;
+```
+
+(Caddy: `header_up X-Forwarded-Proto {scheme}` and `header_up X-Real-IP {remote_host}`.) The proxy must set both, never
+pass on what the browser sent. Then get a one-time setup code and create the account on the page:
+
+```
+sudo runuser -u <service account> -- env SUBS_STATE=<state folder> python3 -I <code folder>/subplot/auth.py setup-code
+```
+
+The same command takes `status`, `unlock` (after 100 wrong tries in a row), `signout` (every browser) and `reset`
+(deletes the account only). Signing in works over HTTPS only. In the page's Account section you can turn on an
+authenticator app, see and sign out browsers, and change the password.
 
 Under a path prefix, use `location /subs/` and `proxy_pass http://unix:/var/lib/subplot-sock/board.sock:/;` and open the page with the
 trailing slash. `PUBLIC_HOST` in `subplot.conf` must match the host name the proxy passes on.

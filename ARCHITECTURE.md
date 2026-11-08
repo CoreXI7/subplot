@@ -315,8 +315,8 @@ under 5 MB by dropping its older half. A kept generated Spanish file (`step == "
 ## The board
 
 `<prefix>-board` serves the page and API on a unix socket only (mode 0660, group = the reverse proxy's); it never
-listens on TCP, has no network access and holds no secret. Signing in is the reverse proxy's job. State is read-only
-except `decisions/` and `requests/`. The server is single-threaded with a cache keyed on mtimes. Request hygiene:
+listens on TCP, has no network access and holds no secret. Signing in is the reverse proxy's job unless `AUTH=login`
+(below). State is read-only except `decisions/` and `requests/` (and `auth/` with `AUTH=login`). The server is single-threaded with a cache keyed on mtimes. Request hygiene:
 
 | check | response |
 | --- | --- |
@@ -358,6 +358,19 @@ same page files are served instead (opened once at start with `O_NOFOLLOW`; each
 `O_NOFOLLOW`, regular files under 1 MiB only; the board refuses an overlay that is, holds or sits inside the state or
 config folder). A review card's `plex_url` is the Plex web app link built from the server's machine id and
 the item id. No payload ever contains a host path (a test greps for `/media/`).
+
+## The board's own sign-in (AUTH=login)
+
+`subplot/auth.py` (the account, sessions, throttle, TOTP and recovery codes; ported unchanged in substance from Fishbowl)
+and `subplot/signin.py` (the request side, a mixin of the board's handler). Files live in `STATE_DIR/auth/` (0700, files
+0600), bound into the board only in this mode and hidden from every other service. Every request still arrives through
+the proxy on the socket: a request counts as HTTPS only with exactly one `X-Forwarded-Proto: https`, and sessions are made
+and accepted only then; the single `X-Real-IP` is used to count tries and to show where a sign-in came from, never to
+grant anything. Without a session the page redirects to `login` and the API answers 401 `{"why", "signin": true}`;
+`/login`, `/login.js`, `/base.css`, `/favicon.svg`, `/api/auth/state` and the four sign-in POSTs are the only public
+paths. Every account change needs the current password again (and a code when two-step is on). The account is created
+with a one-time setup code from `auth.py setup-code`, run as the service account; the board never makes or logs one.
+With `AUTH=proxy` none of this runs and the board answers exactly as before (test_board_modes.py).
 
 ## The page
 

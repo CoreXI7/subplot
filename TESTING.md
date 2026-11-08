@@ -27,8 +27,11 @@ for a in tests/attack/*_attack.py; do SUBS_CODE=$PWD/subplot python3 "$a" | tail
 | test_progress.py | 14 | the live progress row: what it may show, its expiry, path redaction |
 | test_server.py | 17 | the board's API: host and origin checks, request limits, decisions only for files under review |
 | test_board.py | 19 | the socket's mode, path refusal, `api/config`, header tabs, the overlay folder |
-| test_board_seccomp.py | 1 | the real board starts and answers under the units' own syscall filter |
-| test_install.py | 33 | every `subplot.conf` rule, unit rendering, `--check` |
+| test_board_seccomp.py | 2 | the real board starts and answers under the units' own syscall filter, and creates an account and signs in there with `AUTH=login` |
+| test_board_modes.py | 3 | with `AUTH` unset, `proxy` or anything but `login`, the board answers exactly as before the sign-in existed |
+| test_auth.py | 9 | the sign-in's rules: TOTP test vectors and window, passwords, names, recovery and setup codes, sessions and their epoch, the throttle |
+| test_signin.py | 15 | `AUTH=login` on a real board, written from the spec alone: public paths, 303/401 without a session, HTTPS only (and how the proxy's header is read), old sessions after a password change, the setup code used once and raced, waits with `Retry-After`, cookie names and flags, nothing secret in the log (the 100-try lock is skipped: the waits make it too slow) |
+| test_install.py | 38 | every `subplot.conf` rule, unit rendering, `--check`, the `AUTH` setting and where `auth/` is visible |
 | test_install_hardening.py | 10 | the installer's root-side guards: normal paths, no-follow folder creation, no taking over others' folders, units that can't ask for root |
 | test_hook.py | 16 | the privacy hook on throwaway repositories: contents, paths, renames, binaries, names, history |
 | test_vad.py | 11 | the speech measurement: planted offsets found with the right sign, disagreeing halves refused |
@@ -45,12 +48,15 @@ The attack runners in `tests/attack/` throw hostile input at the real code and p
 | pc_attack.py | 95 | hostile results from the GPU PC and hostile names sent to it |
 | place_attack.py | 16 | symlinks, FIFOs, foreign and forged files, traversal, decisions for the wrong key |
 | srt_attack.py | 44 | malformed, oversized and slow-to-parse subtitles, marker tricks |
+| signin_attack.py | 95 | `AUTH=login`: cookie floods and junk cookies, forged forwarding headers, 20 parallel wrong passwords, reused authenticator and recovery codes, cross-site requests on every sign-in and account path, secrets in replies or the log |
 
 Each safety rule was also broken on purpose to prove a test notices: the socket opened to everyone, the overlay following
 symlinks, a `%` accepted in a setting, the hook skipping author names, the double-slash check removed, generated files
 shifted, a disabled check that the halves agree, the speech detector failing silently, and in the installer: non-normal
 paths accepted, someone else's folder taken over, symlinks followed on the way to the state folder, a tampered unit
-template rendered, and a chown in the board (which the syscall filter kills). Each made a test fail.
+template rendered, and a chown in the board (which the syscall filter kills); and in the sign-in: a page made public, the
+session epoch check removed, `X-Forwarded-Proto: http` taken as HTTPS, tries never counted, the setup code logged, `login`
+made the default, and the `Secure` flag dropped. Each made a test fail.
 
 ## What isn't covered
 

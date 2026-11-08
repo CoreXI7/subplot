@@ -263,6 +263,53 @@ class RenderAllTests(unittest.TestCase):
                     self.assertNotRegex(text, r"@[A-Z]")
 
 
+class AuthSettingTests(unittest.TestCase):
+    """SPEC-LOGIN: AUTH is proxy (default) or login; auth/ is bound into the board only with login, and hidden from
+    every other service always."""
+
+    def _render(self, conf_text):
+        conf = I.parse_conf(conf_text)
+        t = I.tokens(conf, conf["RUN_USER"], "/home/" + conf["RUN_USER"])
+        out = {}
+        with tempfile.TemporaryDirectory(dir=os.environ.get("SUBS_SANDBOX") or None) as dest:
+            for _, path in I.render_all(t, dest):
+                with open(path, encoding="utf-8") as f:
+                    out[os.path.basename(path).split("-", 1)[1]] = f.read()
+        return conf, out
+
+    def test_default_is_proxy(self):
+        self.assertEqual(I.parse_conf(without_key("AUTH"))["AUTH"], "proxy")
+
+    def test_only_proxy_or_login(self):
+        self.assertEqual(I.parse_conf(with_value("AUTH", ""))["AUTH"], "proxy", "empty, like every optional key: the default")
+        for bad in ("LOGIN", "login ", "off", "none", "login;x"):
+            with self.subTest(value=bad):
+                with self.assertRaises(I.Refused):
+                    I.parse_conf(with_value("AUTH", bad))
+
+    def test_proxy_renders_no_auth_bind(self):
+        conf, units = self._render(with_value("AUTH", "proxy"))
+        self.assertNotIn("BindPaths=" + conf["STATE_DIR"] + "/auth", units["board.service"])
+        self.assertIn("Environment=SUBS_AUTH=proxy", units["board.service"])
+
+    def test_login_binds_auth_into_the_board_only(self):
+        conf, units = self._render(with_value("AUTH", "login"))
+        line = "BindPaths=" + conf["STATE_DIR"] + "/auth"
+        self.assertIn(line, units["board.service"].split("\n"))
+        self.assertIn("Environment=SUBS_AUTH=login", units["board.service"])
+        for name, text in units.items():
+            if name.endswith(".service") and name != "board.service":
+                with self.subTest(unit=name):
+                    self.assertNotIn(line, text)
+
+    def test_other_services_never_see_auth(self):
+        for mode in ("proxy", "login"):
+            conf, units = self._render(with_value("AUTH", mode))
+            for name in ("scan.service", "find.service", "sync.service", "place.service", "gen.service"):
+                with self.subTest(mode=mode, unit=name):
+                    self.assertIn("InaccessiblePaths=-" + conf["STATE_DIR"] + "/auth", units[name].split("\n"))
+
+
 class MainTests(unittest.TestCase):
 
     def test_check_never_raises(self):

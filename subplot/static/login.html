@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Sign in · Subplot</title>
+<link rel="stylesheet" href="base.css">
+<script src="login.js" defer></script>
+</head>
+<body>
+<main>
+<h1 id="heading">Sign in</h1>
+<p id="loading">Loading…</p>
+<p id="status" role="status" aria-live="polite"></p>
+<p id="wait" aria-hidden="true" hidden></p>
+
+<form id="signin" method="post" hidden novalidate>
+  <p>Sign in to Subplot.</p>
+  <p>
+    <label for="si-user">Name</label>
+    <input id="si-user" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="64">
+  </p>
+  <p>
+    <label for="si-pw">Password</label>
+    <input id="si-pw" name="password" type="password" autocomplete="current-password" required maxlength="1024">
+  </p>
+  <p>
+    <label><input id="si-keep" type="checkbox"> Keep me signed in on this device</label>
+  </p>
+  <button type="submit">Sign in</button>
+</form>
+
+<form id="setup" method="post" hidden novalidate>
+  <p>Create the account that signs in to this page. You need the setup code printed on the server by:</p>
+  <p><code>sudo runuser -u RUN_USER -- env SUBS_STATE=STATE_DIR python3 -I CODE_DIR/subplot/auth.py setup-code</code></p>
+  <p>Each run prints a new code; only the newest one works, and creating the account uses it up.</p>
+  <p>
+    <label for="su-code">Setup code</label>
+    <input id="su-code" name="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" required maxlength="40">
+  </p>
+  <p>
+    <label for="su-user">Name</label>
+    <input id="su-user" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="64">
+  </p>
+  <p>
+    <label for="su-pw">Password</label>
+    <input id="su-pw" name="password" type="password" autocomplete="new-password" required>
+  </p>
+  <p>At least <span id="pw-min">15</span> characters. A few random words are easy to remember and hard to guess.</p>
+  <p>
+    <label><input id="su-keep" type="checkbox"> Keep me signed in on this device</label>
+  </p>
+  <button type="submit">Create the account</button>
+</form>
+
+<form id="code" method="post" hidden novalidate>
+  <p>Type the 6-digit code from your authenticator app, or one of your recovery codes.</p>
+  <p>
+    <label for="c-code">Code</label>
+    <input id="c-code" name="code" type="text" autocomplete="one-time-code" inputmode="text" autocapitalize="characters" spellcheck="false" required maxlength="40">
+  </p>
+  <button type="submit">Continue</button>
+  <button type="button" id="restart">Start over</button>
+</form>
+
+<p id="not-https" hidden>This page is not using HTTPS, so signing in is turned off. Open Subplot through the https address your reverse proxy provides, with X-Forwarded-Proto: https.</p>
+
+<p id="broken" hidden>The sign-in file is damaged, so nobody can sign in. On the server, run <code>sudo runuser -u RUN_USER -- env SUBS_STATE=STATE_DIR python3 -I CODE_DIR/subplot/auth.py reset</code>; it prints a new setup code.</p>
+</main>
+</body>
+</html>

@@ -23,6 +23,7 @@ TimeoutStartSec=2h
 EnvironmentFile=@CONFIG_DIR@/.env
 BindPaths=@STATE_DIR@
 BindPaths=@MEDIA_ROOT@
+InaccessiblePaths=-@STATE_DIR@/auth
 InaccessiblePaths=-@STATE_DIR@/tokens
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 IPAddressAllow=127.0.0.1

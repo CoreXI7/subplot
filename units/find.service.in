@@ -23,6 +23,7 @@ Environment=SUBS_OVERLAY=@OVERLAY_DIR@
 TimeoutStartSec=60min
 EnvironmentFile=@CONFIG_DIR@/.env
 BindPaths=@STATE_DIR@
+InaccessiblePaths=-@STATE_DIR@/auth
 InaccessiblePaths=-@MEDIA_ROOT@
 InaccessiblePaths=-@HIDE_PATH@
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

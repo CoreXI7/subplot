@@ -40,8 +40,9 @@ PATTERNS = {                                       # key: (regex, required)
     "UNIT_PREFIX": (r"subplot|subs", False),
     "OVERLAY_DIR": (PATH, False),
     "HIDE_PATHS": (PATH + r"(?: " + PATH + r"){0,15}", False),   # extra mounts the services without media access must not see
+    "AUTH": (r"proxy|login", False),                               # login: the board's own sign-in (SPEC-LOGIN)
 }
-DEFAULTS = {"MARKER_TAG": "subplot", "USER_AGENT": "subplot v1.0", "UNIT_PREFIX": "subplot", "OVERLAY_DIR": "", "HIDE_PATHS": ""}
+DEFAULTS = {"MARKER_TAG": "subplot", "USER_AGENT": "subplot v1.0", "UNIT_PREFIX": "subplot", "OVERLAY_DIR": "", "HIDE_PATHS": "", "AUTH": "proxy"}
 REPEAT = {"MEDIA_ROOT": "MEDIA_ROOTS", "HIDE_PATH": "HIDE_PATHS"}          # a line with @MEDIA_ROOT@ repeats per media root
 PATH_KEYS = ("CODE_DIR", "STATE_DIR", "CONFIG_DIR", "VENV", "SOCKET", "OVERLAY_DIR", "PLEX_DB")
 STEPS = ("scan", "find", "sync", "place", "gen", "board")
@@ -101,6 +102,7 @@ def tokens(conf, run_group, run_home):
     t["RUN_GROUP"], t["RUN_HOME"] = run_group, run_home
     t["SOCKET_DIR"] = os.path.dirname(conf["SOCKET"])
     t["PLEX_DB_DIR"] = os.path.dirname(conf["PLEX_DB"])
+    t["AUTH_DIR"] = conf["STATE_DIR"] + "/auth" if conf["AUTH"] == "login" else ""   # empty: its BindPaths line is dropped
     for key in ("RUN_GROUP",):
         if not re.fullmatch(NAME, t[key]):
             raise Refused(f"{key}: value not allowed")
@@ -309,7 +311,7 @@ def install(conf, written, run_group):
     finally:
         os.close(parent)
     try:
-        for sub in STATE_SUBDIRS:
+        for sub in STATE_SUBDIRS + (("auth",) if conf["AUTH"] == "login" else ()):
             os.close(_own_dir(state_fd, sub, pw.pw_uid, pw.pw_gid, 0o700, f"STATE_DIR/{sub}"))
     finally:
         os.close(state_fd)
@@ -410,7 +412,12 @@ def main(argv):
         _cleanup(locals().get("tmp"))
         return 2
     print("installed: " + " ".join(n for n, _ in written))
-    print("next: point your reverse proxy at the socket and sign in through it (README, 'Reverse proxy').")
+    if conf["AUTH"] == "login":
+        print("next: point your reverse proxy at the socket (it must set X-Forwarded-Proto and X-Real-IP), then get the")
+        print("setup code (each run makes a new one; it works once) and create the account on the page:")
+        print(f"  sudo runuser -u {conf['RUN_USER']} -- env SUBS_STATE={conf['STATE_DIR']} python3 -I {conf['CODE_DIR']}/subplot/auth.py setup-code")
+    else:
+        print("next: point your reverse proxy at the socket and sign in through it (README, 'Reverse proxy').")
     return 0
 
 

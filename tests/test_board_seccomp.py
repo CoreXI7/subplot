@@ -55,6 +55,49 @@ class BoardUnderFilter(unittest.TestCase):
             subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True, timeout=60)
             shutil.rmtree(base, ignore_errors=True)
 
+    def test_login_mode_signs_in_under_the_filter(self):
+        """AUTH=login: the setup code, scrypt, the file lock and the account's writes all run under the filter."""
+        base = tempfile.mkdtemp(prefix="subplot-seccomp-", dir=os.environ.get("SUBS_SANDBOX") or os.path.expanduser("~"))
+        state, cfg, run = (os.path.join(base, d) for d in ("state", "cfg", "run"))
+        for d in (state, cfg, run):
+            os.makedirs(d)
+        os.makedirs(os.path.join(state, "auth"), mode=0o700)
+        with open(os.path.join(cfg, "rules.json"), "w") as f:
+            f.write("{}")
+        code = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "subplot", "auth.py"), "setup-code"],
+                              env={**os.environ, "SUBS_STATE": state}, capture_output=True, text=True, timeout=60).stdout.split()[-1]
+        sock = os.path.join(run, "b.sock")
+        unit = f"subplot-seccomp-login-{os.getpid()}"
+        props = []
+        for line in filter_lines():
+            props += ["-p", line]
+        env = [f"--setenv={k}={v}" for k, v in (("SUBS_STATE", state), ("SUBS_RULES", os.path.join(cfg, "rules.json")),
+                                                  ("SUBS_HOST", "subs.example.com"), ("SUBS_SOCK", sock), ("SUBS_SOCK_GROUP", ""),
+                                                  ("SUBS_AUTH", "login"))]
+        subprocess.run(["systemd-run", "--user", "--quiet", "--collect", f"--unit={unit}", *props, *env,
+                        sys.executable, "-I", os.path.join(ROOT, "subplot", "server.py")], check=True, timeout=60)
+        try:
+            for _ in range(50):
+                if os.path.exists(sock):
+                    break
+                time.sleep(0.2)
+            self.assertTrue(os.path.exists(sock), "the board never created its socket (killed by the filter?)")
+            time.sleep(0.5)
+            body = ('{"code": "%s", "user": "owner", "password": "plinth-marble-otter-cascade"}' % code).encode()
+            c = socket.socket(socket.AF_UNIX); c.settimeout(30); c.connect(sock)
+            c.sendall(b"POST /api/setup-account HTTP/1.1\r\nHost: subs.example.com\r\nX-Forwarded-Proto: https\r\n"
+                      b"X-Subs: 1\r\nContent-Type: application/json\r\nContent-Length: " + str(len(body)).encode() +
+                      b"\r\nConnection: close\r\n\r\n" + body)
+            reply = b""
+            while (b := c.recv(65536)):
+                reply += b
+            c.close()
+            self.assertTrue(reply.startswith(b"HTTP/1.1 200"), reply[:200])
+            self.assertIn(b"__Host-subplot=", reply)
+            self.assertTrue(os.path.exists(os.path.join(state, "auth", "auth.json")))
+        finally:
+            subprocess.run(["systemctl", "--user", "stop", unit], capture_output=True, timeout=60)
+            shutil.rmtree(base, ignore_errors=True)
 
 if __name__ == "__main__":
     unittest.main()

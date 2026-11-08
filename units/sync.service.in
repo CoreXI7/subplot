@@ -23,6 +23,7 @@ Environment=SUBS_OVERLAY=@OVERLAY_DIR@
 TimeoutStartSec=2h
 BindPaths=@STATE_DIR@
 BindReadOnlyPaths=@MEDIA_ROOT@
+InaccessiblePaths=-@STATE_DIR@/auth
 InaccessiblePaths=-@CONFIG_DIR@/.env
 InaccessiblePaths=-@STATE_DIR@/tokens
 RestrictAddressFamilies=AF_UNIX

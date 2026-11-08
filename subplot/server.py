@@ -7,6 +7,9 @@ import calendar, fcntl, grp, http.server, json, math, os, re, socketserver, stat
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import common as C
+import signin                            # noqa: E402  (AUTH=login: the board's own sign-in; SPEC-LOGIN)
+
+AUTH = signin.AUTH                       # "proxy" (default: the reverse proxy signs people in) or "login"
 
 SOCK = os.environ.get("SUBS_SOCK", "/run/subplot/board.sock")
 SOCK_GROUP = os.environ.get("SUBS_SOCK_GROUP", "")                    # the reverse proxy's group; empty = the service's own
@@ -16,7 +19,10 @@ OVERLAY = os.environ.get("SUBS_OVERLAY", "")
 STATIC = os.path.join(C.HERE, "static")
 FILES = {"/": ("index.html", "text/html; charset=utf-8"), "/subs.js": ("subs.js", "text/javascript; charset=utf-8"),
          "/subs-views.js": ("subs-views.js", "text/javascript; charset=utf-8"), "/subs.css": ("subs.css", "text/css; charset=utf-8"),
-         "/base.css": ("base.css", "text/css; charset=utf-8"), "/favicon.svg": ("favicon.svg", "image/svg+xml")}
+         "/base.css": ("base.css", "text/css; charset=utf-8"), "/favicon.svg": ("favicon.svg", "image/svg+xml"),
+         "/account.js": ("account.js", "text/javascript; charset=utf-8")}
+if AUTH == "login":
+    FILES.update({"/login": ("login.html", "text/html; charset=utf-8"), "/login.js": ("login.js", "text/javascript; charset=utf-8")})
 NAV_LABEL = re.compile(r"[A-Za-z0-9 .&'_-]{1,24}")
 NAV_PATH = re.compile(r"/(?!.*//)(?![/\\])[A-Za-z0-9/_.#?=&-]{0,200}")
 NAV_HTTPS = re.compile(r"https://[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*(?::\d{1,5})?(?:/[A-Za-z0-9/_.#?=&-]{0,200})?")
@@ -447,7 +453,7 @@ def pc_override_until():
     return until if isinstance(until, str) and C.pc_override() else None
 
 
-class Handler(http.server.BaseHTTPRequestHandler):
+class Handler(signin.SignIn, http.server.BaseHTTPRequestHandler):
     server_version, sys_version, protocol_version = "subs", "", "HTTP/1.1"
 
     timeout = 15                                                          # a stalled client cannot hold the single thread
@@ -456,6 +462,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def handle_one_request(self):
+        self._token = None                                                # never a session from an earlier request
         try:
             super().handle_one_request()
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:   # a torn state file must not drop the connection silently
@@ -464,7 +471,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except OSError:
                 pass
 
-    def reply(self, code, payload, ctype="application/json"):
+    def reply(self, code, payload, ctype="application/json", extra=None, cookies=()):
         body = payload if isinstance(payload, bytes) else json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
         if self.command == "HEAD":
             body = b""
@@ -474,6 +481,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Connection", "close")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        for c in cookies:
+            self.send_header("Set-Cookie", c)
         self.end_headers()
         self.wfile.write(body)
 
@@ -493,6 +504,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if self.headers.get("Content-Length") not in (None, "0") or self.headers.get("Transfer-Encoding"):
             return self.reply(400, {"why": "a GET carries no body"})
+        if not self.gate(path):
+            return
         if path in FILES:
             name, ctype = FILES[path]
             data = overlay_bytes(name)
@@ -500,7 +513,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 data = C.read_bytes(os.path.join(STATIC, name), 1024 * 1024)
             return self.reply(200, data, ctype) if data is not None else self.reply(404, {"why": "not found"})
         if path == "/api/config":
-            return self.reply(200, {"nav": _nav})
+            return self.reply(200, {"nav": _nav, "auth": "login"} if AUTH == "login" else {"nav": _nav})
+        if AUTH == "login" and path == "/api/auth/state":
+            return self.reply(200, self.auth_state())
+        if AUTH == "login" and path == "/api/account":
+            try:
+                return self.reply(200, self.account_view())
+            except (signin.auth.Broken, TypeError):                       # reset on the host meanwhile
+                return self.reply(409, {"why": "the account changed: reload the page", "restart": True})
         try:
             query = urllib.parse.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "", max_num_fields=5)
         except ValueError:
@@ -520,13 +540,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.checked()
         if path is None:
             return
-        if path not in ("/api/request", "/api/decision", "/api/pc"):
+        signing = AUTH == "login" and (path in signin.PUBLIC_POST or path in signin.ACCOUNT_POST)
+        if path not in ("/api/request", "/api/decision", "/api/pc") and not signing:
             return self.reply(404, {"why": "not found"})
         if self.headers.get("X-Subs") != "1":
             return self.reply(403, {"why": "missing X-Subs header"})
         origin, sfs = self.headers.get("Origin"), self.headers.get("Sec-Fetch-Site")
         if origin not in (None, f"https://{HOST}") or sfs not in (None, "same-origin"):
             return self.reply(403, {"why": "cross-origin request refused"})
+        if not self.gate(path, post=True):
+            return
         if self.headers.get("Transfer-Encoding") or len(self.headers.get_all("Content-Length") or []) > 1:
             return self.reply(400, {"why": "unsupported framing"})
         try:
@@ -540,6 +563,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             body = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, ValueError):
             return self.reply(400, {"why": "bad JSON"})
+        if signing:
+            return self.auth_post(path, body)
         code, payload = {"/api/request": handle_request, "/api/decision": handle_decision, "/api/pc": handle_pc}[path](body)
         self.reply(code, payload)
 

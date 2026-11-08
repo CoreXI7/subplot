@@ -19,6 +19,7 @@ Environment=SUBS_MARKER_TAG=@MARKER_TAG@
 Environment="SUBS_USER_AGENT=@USER_AGENT@"
 Environment=SUBS_NAV_FILE=@CONFIG_DIR@/nav.json
 Environment=SUBS_OVERLAY=@OVERLAY_DIR@
+Environment=SUBS_AUTH=@AUTH@
 SupplementaryGroups=@PROXY_GROUP@
 Restart=always
 RestartSec=5
@@ -26,6 +27,7 @@ BindReadOnlyPaths=@STATE_DIR@
 BindPaths=@STATE_DIR@/decisions
 BindPaths=@STATE_DIR@/requests
 BindPaths=@SOCKET_DIR@
+BindPaths=@AUTH_DIR@
 InaccessiblePaths=-@CONFIG_DIR@/.env
 InaccessiblePaths=-@STATE_DIR@/tokens
 InaccessiblePaths=-@MEDIA_ROOT@

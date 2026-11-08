@@ -17,7 +17,7 @@ Only the latest commit on `main`. Fixed problems get a GitHub Security Advisory.
 
 ## What's in scope
 
-- the page and its API (served on the unix socket)
+- the page and its API (served on the unix socket), and its own sign-in (`AUTH=login`)
 - subtitle parsing and validation, and anything a provider reply or a downloaded file can make Subplot do
 - what the GPU PC can make the server do through the files it returns
 - where files are written or deleted on the media drives
@@ -26,8 +26,9 @@ Only the latest commit on `main`. Fixed problems get a GitHub Security Advisory.
 Especially interesting: anything that writes or deletes outside a video's own subtitle, touches a file Subplot didn't
 write, gets a secret into a log, a state file, the page or the PC, or lets the downloader reach your network.
 
-Out of scope: problems that need shell access as root or as the service account; running it without a reverse proxy that
-signs you in, or with that proxy open to everyone; bugs in ffmpeg, Plex or other dependencies that aren't specific to how
+Out of scope: problems that need shell access as root or as the service account; with `AUTH=proxy`, running it without a
+reverse proxy that signs you in, or with that proxy open to everyone; with `AUTH=login`, a proxy that passes on the
+client's own `X-Forwarded-Proto` or `X-Real-IP` instead of setting them; bugs in ffmpeg, Plex or other dependencies that aren't specific to how
 Subplot uses them (report those upstream); scanner output with no explanation of impact.
 
 ## How it's fenced in
@@ -54,7 +55,11 @@ memory and CPU limits, and only the folders it needs:
   headers, and redacted from every log line and stored message. The GPU PC never receives one.
 - **The page.** It checks the `Host` header, needs a custom header and a same-origin request for every change, caps
   request bodies, and can only record decisions and requests; it can't name a path, a provider or a threshold. Signing in
-  is your reverse proxy's job.
+  is your reverse proxy's job, or with `AUTH=login` the page's own: scrypt passwords checked against common ones, an
+  optional authenticator app (each code works once) with one-time recovery codes, sessions kept only as hashes in
+  `HttpOnly; Secure; SameSite=Strict` `__Host-` cookies, tries counted before they are checked, waits that double, a
+  lock after 100 wrong tries in a row (browsers that signed in before count on their own), the password again for every
+  account change, and HTTPS only. The account files are visible to the page's service alone.
 - **Installing.** `install.sh` accepts each setting only if it matches a strict pattern, so no value can inject systemd
   syntax; it refuses a root service account and checks every rendered unit with `systemd-analyze verify`.
 
