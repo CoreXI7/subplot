@@ -367,8 +367,9 @@ async function toggleGenerateNow(on) {
       failMsg = (res && res.data && res.data.why) ? res.data.why : "Could not change it. Try again.";
     } else {
       const data = res.data || {};
-      const until = data.until != null ? data.until : data.generate_now_until;
-      if (until != null) {
+      // "off" answers {until: null}: store that too, or the stale "on until" time flips the switch back on (2026-11-12)
+      const until = ("until" in data) ? data.until : data.generate_now_until;
+      if (until !== undefined) {
         if (!state.data) state.data = {};
         state.data.pc = Object.assign({}, state.data.pc || {}, { generate_now_until: until });
       }
