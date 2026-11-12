@@ -309,7 +309,8 @@ def _log_worker_tail(errlog):
 def run_worker_watched(remote, run, rules=None, probe=probe_pc, poll_s=30):
     """Run the worker over SSH in the background and probe the PC every poll_s seconds; the moment another process works
     the GPU (Ollama, a game, anything but our own python worker) the worker is killed and (1, 'preempted: <name>') is
-    returned, so the owner's model never waits. Returns (0, '') on success, (124, 'worker timed out') at PC_TIMEOUT,
+    returned, so the owner's model never waits; the owner's Pause switch (C.pc_paused()) kills it the same way, yielding
+    (1, 'preempted: paused'). Returns (0, '') on success, (124, 'worker timed out') at PC_TIMEOUT,
     (rc, 'worker exit rc') otherwise."""
     import subprocess
     cmd = ssh_args(f'& "{C.PC_ROOT}\\venv\\Scripts\\python.exe" "{C.PC_ROOT}\\pc\\subs_worker.py" "{remote}"')
@@ -335,6 +336,9 @@ def run_worker_watched(remote, run, rules=None, probe=probe_pc, poll_s=30):
         if time.monotonic() > deadline:
             proc.kill(); kill_remote_worker(remote, run)
             return 124, "worker timed out"
+        if C.pc_paused():
+            proc.kill(); kill_remote_worker(remote, run)
+            return 1, "preempted: paused"
         p = probe(run)
         done_ms = read_progress(remote, run)
         if done_ms is not None:
@@ -401,6 +405,11 @@ def run_pc(key, run, rules=None):
 def main():
     rules = C.load_rules()
     if rules is None:
+        return 0
+    if C.pc_paused():                                                   # the owner's Pause switch: no SSH, no probe, nothing
+        prev = C.read_json(C.PC_STATUS, 8192) or {}
+        C.write_json(C.PC_STATUS, {"at": C.now(), "idle": False, "why": "paused", "gpu_util": None,
+                                   "idle_since": None, "last_run": prev.get("last_run")})
         return 0
     override = C.pc_override()
     if not override and not C.inside_idle_hours(rules):                 # (runs every minute: no SSH to the PC outside the hours)

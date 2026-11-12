@@ -35,6 +35,11 @@
       <div class="now-head"><span id="now-dot" class="now-dot" aria-hidden="true"></span><span id="now-title" class="now-title">Idle</span><span id="now-pct" class="now-pct"></span></div>
       <div id="now-bar" class="now-bar" role="progressbar" aria-label="Current item" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div id="now-fill" class="now-fill"></div></div>
       <p id="now-meta" class="now-meta"></p>
+      <label class="switch" for="pause">
+        <input type="checkbox" id="pause" role="switch" aria-checked="false" aria-describedby="pause-hint">
+        <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        <span class="switch-text"><span class="switch-label">Pause generating</span><span id="pause-hint" class="switch-hint">Stops any running job and sends nothing to the PC until switched off.</span></span>
+      </label>
       <label class="switch" for="go-now">
         <input type="checkbox" id="go-now" role="switch" aria-checked="false" aria-describedby="go-now-hint">
         <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>

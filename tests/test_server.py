@@ -245,6 +245,28 @@ class SubsServerTest(unittest.TestCase):
         self.assertIsNone(_json(self._get("/api/state")[1])["pc"]["generate_now_until"])
         self.assertFalse(C.pc_override())
 
+    def test_pause_switch(self):
+        """POST /api/pc pause on -> 202 paused, clears the Generate now file, generate_now 409; off; bad bodies 400."""
+        import common as C
+        code, data = self._post("/api/pc", {"generate_now": True, "hours": 2})
+        self.assertEqual(code, 202, _json(data))
+        self.assertTrue(os.path.exists(C.PC_OVERRIDE))
+        code, data = self._post("/api/pc", {"paused": True})
+        data = _json(data)
+        self.assertEqual(code, 202, data)
+        self.assertIs(data["paused"], True)
+        st = _json(self._get("/api/state")[1])
+        self.assertIs(st["pc"]["paused"], True)
+        self.assertIsNone(st["pc"]["generate_now_until"])
+        self.assertFalse(os.path.exists(os.path.join(STATE, "decisions", "pc-generate-now.json")))
+        self.assertEqual(self._post("/api/pc", {"generate_now": True, "hours": 2})[0], 409)
+        code, data = self._post("/api/pc", {"paused": False})
+        data = _json(data)
+        self.assertEqual((code, data.get("paused")), (202, False))
+        self.assertIs(_json(self._get("/api/state")[1])["pc"]["paused"], False)
+        for bad in ({"paused": "yes"}, {"paused": 1}, {"generate_now": True, "paused": True}, {}):
+            self.assertEqual(self._post("/api/pc", bad)[0], 400, bad)
+
     def test_review2_server_rules(self):
         """Chunked framing refused; shift needs a real <key>.<lang> pair; NaN never emitted; a bogus review file is ignored."""
         import common as C

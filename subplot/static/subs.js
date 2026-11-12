@@ -380,6 +380,49 @@ async function toggleGenerateNow(on) {
     state.switchPending = false;
     if (box) box.disabled = false;
     renderSwitch();
+    renderPause();
+    if (failMsg) setText(hint, failMsg);
+  }
+}
+function renderPause() {
+  /* The Pause switch mirrors state.data.pc.paused. While paused the hint says so and Generate now is disabled, unless a
+     generate-now POST is in flight. While a POST is in flight the input is disabled. */
+  const box = $("pause");
+  const hint = $("pause-hint");
+  if (!box || state.pausePending) return;
+  const pc = (state.data && state.data.pc) || {};
+  const paused = pc.paused === true;
+  box.checked = paused;
+  box.setAttribute("aria-checked", paused ? "true" : "false");
+  if (paused) {
+    setText(hint, "Paused. Nothing runs on the PC until you switch this off.");
+  } else {
+    setText(hint, "Stops any running job and sends nothing to the PC until switched off.");
+  }
+  const go = $("go-now");
+  if (go) go.disabled = paused && !state.switchPending;
+}
+async function togglePause(on) {
+  const box = $("pause");
+  const hint = $("pause-hint");
+  state.pausePending = true;
+  if (box) box.disabled = true;
+  let failMsg = null;
+  try {
+    const res = await api("/pc", { paused: !!on });
+    if (!res || res.status !== 202) {
+      failMsg = (res && res.data && res.data.why) ? res.data.why : "Could not change it. Try again.";
+    } else if (res.data && "paused" in res.data) {
+      if (!state.data) state.data = {};
+      state.data.pc = Object.assign({}, state.data.pc || {}, { paused: !!res.data.paused });
+    }
+  } catch (e) {
+    failMsg = "Could not reach Subs. Try again.";
+  } finally {
+    state.pausePending = false;
+    if (box) box.disabled = false;
+    renderPause();
+    renderSwitch();
     if (failMsg) setText(hint, failMsg);
   }
 }
@@ -479,6 +522,7 @@ async function load() {
       renderCoverage();
       renderProgress();
       renderSwitch();
+      renderPause();
       renderRecent();
       if (typeof renderReview === "function") renderReview();
     } else {
@@ -502,6 +546,8 @@ function boot() {
   $("sheet-cancel").addEventListener("click", () => $("sheet").close());
   const go = $("go-now");
   if (go) go.addEventListener("change", () => toggleGenerateNow(go.checked));
+  const pause = $("pause");
+  if (pause) pause.addEventListener("change", () => togglePause(pause.checked));
   load();
   if (typeof loadMissing === "function") loadMissing();
   renderNav();

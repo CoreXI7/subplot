@@ -52,6 +52,7 @@ CURRENT = os.path.join(STATE, "current.json")
 SETTINGS_DIR = os.path.join(STATE, "settings")           # the page's settings (SPEC-SETTINGS.md); only the board writes here
 SETTINGS = os.path.join(SETTINGS_DIR, "settings.json")
 SETTINGS_HISTORY = os.path.join(SETTINGS_DIR, "history.log")
+PC_PAUSE = os.path.join(DECISIONS, "pc-paused.json")          # the page's Pause switch: {"at", "by"}; no expiry (2026-11-12)
 PC_OVERRIDE = os.path.join(DECISIONS, "pc-generate-now.json")   # the page's "Generate now" switch: {"until", "at", "by"}; not an item key        # what a step is working on right now (find.py, gen.py); absent = nothing
 
 EXCLUDE_LIBRARIES = ("Hentai",)                     # hard-coded on purpose: rules.json can add names, never remove this one
@@ -1151,6 +1152,14 @@ def budget_exhaust(until_iso):
 
 
 # ---------------------------------------------------------------- the PC
+
+def pc_paused():
+    """True while the owner's Pause switch is on: decisions/pc-paused.json exists in any form (a valid object, garbage or a
+    symlink all count: fail closed). A missing file = not paused. No expiry."""
+    if not os.path.lexists(PC_PAUSE):
+        return False
+    return True                                                      # present in any form = paused (fail closed)
+
 
 def pc_override(now_t=None):
     """True while the owner's "Generate now" switch is on: decisions/pc-generate-now.json holds an `until` in the future

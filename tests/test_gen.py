@@ -248,6 +248,67 @@ class GenTests(unittest.TestCase):
             r = json.loads(json.dumps(real)); r["pc_idle"]["unload_idle_model"]["after_min"] = -1
             self.assertIn("after_min", C._rules_problem(r) or "")
 
+    def test_pc_paused_states(self):
+        """The Pause file fails closed: missing is 'not paused', a valid object and garbage bytes both pause."""
+        path = C.PC_PAUSE
+        try:
+            if os.path.exists(path) or os.path.islink(path):
+                os.unlink(path)
+            self.assertFalse(C.pc_paused())
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write('{"at": "2026-11-12T08:52:54Z", "by": "page"}')
+            self.assertTrue(C.pc_paused())
+            with open(path, "wb") as fh:
+                fh.write(b"\x00not json{{")
+            self.assertTrue(C.pc_paused(), "garbage must fail closed")
+        finally:
+            if os.path.exists(path) or os.path.islink(path):
+                os.unlink(path)
+
+    def test_paused_main_does_nothing(self):
+        """While paused main must not probe, SSH or run: it only records why 'paused' and exits 0."""
+        rules = {"pc_idle": {"hours": ["mon-sun 00:00-23:59"]}, "generate": {"max_hours_per_night": 6}}
+        path = C.PC_PAUSE
+        try:
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write('{"at": "2026-11-12T08:52:54Z", "by": "page"}')
+            run = mock.Mock(return_value=(0, b"", b""))
+            probe = mock.Mock(return_value={"gpu_util": 5, "busy_procs": [], "processes": [], "game_procs": []})
+            with mock.patch.object(C, "load_rules", return_value=rules), mock.patch.object(gen, "run", run), \
+                    mock.patch.object(gen, "probe_pc", probe, create=True):
+                self.assertEqual(gen.main(), 0)
+            self.assertFalse(run.called, "a paused run must not touch the PC")
+            self.assertFalse(probe.called, "a paused run must not probe the PC")
+            self.assertEqual(C.read_json(C.PC_STATUS, 8192)["why"], "paused")
+        finally:
+            if os.path.exists(path) or os.path.islink(path):
+                os.unlink(path)
+
+    def test_watcher_stops_on_pause(self):
+        """The pause switch kills a running worker: the next poll sees the file and preempts with 'paused'."""
+        path = C.PC_PAUSE
+        calls = []
+        def run(args, timeout):
+            calls.append(args[-1])
+            return 0, b"", b""
+        def probe(rules):
+            os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+            with open(path, "w") as fh:
+                fh.write('{"at": "2026-11-12T08:52:54Z", "by": "page"}')
+            return {"gpu_util": 3, "busy_procs": [], "processes": [], "game_procs": []}
+        try:
+            if os.path.exists(path) or os.path.islink(path):
+                os.unlink(path)
+            with mock.patch("subprocess.Popen", FakeProc):
+                rc, why = gen.run_worker_watched("C:\\Subplot\\jobs\\ep-1", run, None, probe=probe, poll_s=0)
+            self.assertEqual((rc, why), (1, "preempted: paused"))
+            self.assertTrue(any("Stop-Process" in c for c in calls), "the worker must be killed")
+        finally:
+            if os.path.exists(path) or os.path.islink(path):
+                os.unlink(path)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -282,7 +282,7 @@ def state_payload():
     return {"at": C.now(), "coverage": libs, "stale": bool(cov.get("stale")), "scan_at": cov.get("at"), "tonight": tonight,
             "recent": recent, "review": review, "queue": queue,
             "budget": {"downloads": budget.get("downloads", 0), "limit": (rules.get("find") or {}).get("daily_budget"), "exhausted_until": budget.get("exhausted_until")},
-            "pc": {**{k: pc.get(k) for k in ("at", "idle", "why", "idle_since", "last_run", "gpu_util")}, "generate_now_until": pc_override_until()},
+            "pc": {**{k: pc.get(k) for k in ("at", "idle", "why", "idle_since", "last_run", "gpu_util")}, "generate_now_until": pc_override_until(), "paused": C.pc_paused()},
             "idle_hours": (rules.get("pc_idle") or {}).get("hours", []),
             "current": current_payload(rules),
             "requests": [{"id": rid, "kind": r.get("kind"), "key": r.get("key"), "show": _pub(r.get("show")), "at": _pub(r.get("at"))}
@@ -538,14 +538,41 @@ def _append_history(entry):
 
 
 def handle_pc(body):
-    """The owner's "Generate now" switch: {"generate_now": bool, "hours": 1..12 (default 6)} -> decisions/pc-generate-now.json
-    with `until` = now + hours (on) or removed (off). Only the idle hours are waived by it (common.pc_idle)."""
-    if not isinstance(body, dict) or not isinstance(body.get("generate_now"), bool):
+    """The owner's PC switches: a body carrying exactly one of {"generate_now": bool, "hours": 1..12 (default 6)} or
+    {"paused": bool}. generate_now -> decisions/pc-generate-now.json with `until` = now + hours (on) or removed (off), and
+    only the idle hours are waived by it (common.pc_idle); it is refused (409) while paused. paused -> decisions/pc-paused.json
+    {"at", "by"} and any generate-now file removed (on), or its removal (off); it has no expiry and lasts until switched off."""
+    if not isinstance(body, dict):
+        return 400, {"why": "generate_now must be true or false"}
+    if len(set(body) & {"generate_now", "paused"}) > 1:
+        return 400, {"why": "send exactly one of generate_now or paused"}
+    if "paused" in body:
+        if not isinstance(body["paused"], bool):
+            return 400, {"why": "paused must be true or false"}
+        if body["paused"]:
+            C.write_json(C.PC_PAUSE, {"at": C.now(), "by": "page"})
+            try:
+                os.unlink(C.PC_OVERRIDE)
+            except FileNotFoundError:
+                pass
+            C.log("action: paused")
+            return 202, {"ok": True, "paused": True}
+        try:
+            os.unlink(C.PC_PAUSE)
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return 500, {"why": "could not unpause"}
+        C.log("action: unpaused")
+        return 202, {"ok": True, "paused": False}
+    if not isinstance(body.get("generate_now"), bool):
         return 400, {"why": "generate_now must be true or false"}
     hours = body.get("hours", 6)
     if isinstance(hours, bool) or not isinstance(hours, int) or not 1 <= hours <= PC_HOURS_MAX:
         return 400, {"why": f"hours must be 1..{PC_HOURS_MAX}"}
     if body["generate_now"]:
+        if C.pc_paused():
+            return 409, {"why": "paused"}
         until = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + hours * 3600))
         C.write_json(C.PC_OVERRIDE, {"until": until, "at": C.now(), "by": "page"})
         C.log(f"action: generate now until {until}")

@@ -5,6 +5,7 @@ of requests (status, headers minus Date, body). The reference is the commit befo
 checkout's subplot/ folder; default: git's v1 tag or the first parent of the sign-in commit, exported to the sandbox).
 index.html, subs.js and account.js changed on purpose (the Account section, and a 401 that sends the page to sign in) and are compared only for status.
 Also: STATE_DIR/auth is never created, and nothing sign-in related answers."""
+import json
 import os, shutil, socket, subprocess, sys, tempfile, time, unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -98,6 +99,11 @@ class ProxyModeUnchanged(unittest.TestCase):
                 new, ref = ask(new_sock, method, path, body), ask(ref_sock, method, path, body)
                 if path in CHANGED_ON_PURPOSE:
                     self.assertEqual(new[0].split(" ")[1] in ("200",), True, new[0])
+                    continue
+                if (method, path) == ("GET", "/api/state"):                     # 2026-11-12: pc.paused added on purpose
+                    nb = json.loads(new[2]); nb.get("pc", {}).pop("paused", None)
+                    strip = lambda h: [x for x in h if not x.lower().startswith("content-length:")]
+                    self.assertEqual((new[0], strip(new[1]), nb), (ref[0], strip(ref[1]), json.loads(ref[2])))
                     continue
                 self.assertEqual(new, ref)
         self.assertFalse(os.path.exists(os.path.join(self.state, "auth")), "proxy mode created STATE_DIR/auth")
